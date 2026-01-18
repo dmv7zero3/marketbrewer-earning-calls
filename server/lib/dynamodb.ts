@@ -1,0 +1,320 @@
+// DynamoDB Client - Single Table Design (No GSIs)
+// Table: marketbrewer-earnings-call
+// Billing: PAY_PER_REQUEST (cost optimized)
+
+import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
+import {
+  DynamoDBDocumentClient,
+  PutCommand,
+  GetCommand,
+  QueryCommand,
+  ScanCommand,
+  DeleteCommand,
+  UpdateCommand,
+} from '@aws-sdk/lib-dynamodb';
+
+const client = new DynamoDBClient({
+  region: process.env.AWS_REGION || 'us-east-1',
+});
+
+export const docClient = DynamoDBDocumentClient.from(client);
+
+const TABLE_NAME = process.env.DYNAMODB_TABLE_NAME || 'marketbrewer-earnings-call';
+
+// Entity Types
+export interface Transcript {
+  PK: string; // TRANSCRIPT#{eventTicker}
+  SK: string; // DATE#{date}
+  eventTicker: string;
+  company: string;
+  date: string;
+  quarter: string; // Q1, Q2, Q3, Q4
+  year: number;
+  content: string;
+  wordCount: number;
+  createdAt: string;
+  expiresAt?: number; // TTL (optional)
+}
+
+export interface ResearchNote {
+  PK: string; // NOTE#{eventTicker}
+  SK: string; // TIMESTAMP#{timestamp}
+  eventTicker: string;
+  company: string;
+  content: string;
+  tags: string[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface BetRecord {
+  PK: string; // BET#{betId}
+  SK: string; // METADATA
+  betId: string;
+  eventTicker: string;
+  marketTicker: string;
+  company: string;
+  word: string;
+  side: 'yes' | 'no';
+  action: 'buy' | 'sell';
+  count: number;
+  price: number;
+  status: 'pending' | 'filled' | 'cancelled';
+  orderId?: string;
+  createdAt: string;
+  settledAt?: string;
+  result?: 'win' | 'loss' | 'void';
+  pnl?: number;
+}
+
+export interface NewsCache {
+  PK: string; // NEWSCACHE#{word}
+  SK: string; // DATE#{date}
+  word: string;
+  articleCount: number;
+  articles: Array<{
+    title: string;
+    source: string;
+    url: string;
+    publishedAt: string;
+  }>;
+  fetchedAt: string;
+  expiresAt: number; // TTL - 6 hours
+}
+
+// Transcript Functions
+export async function saveTranscript(transcript: Omit<Transcript, 'PK' | 'SK' | 'createdAt'>) {
+  const item: Transcript = {
+    PK: `TRANSCRIPT#${transcript.eventTicker}`,
+    SK: `DATE#${transcript.date}`,
+    ...transcript,
+    createdAt: new Date().toISOString(),
+  };
+
+  await docClient.send(
+    new PutCommand({
+      TableName: TABLE_NAME,
+      Item: item,
+    })
+  );
+
+  return item;
+}
+
+export async function getTranscript(eventTicker: string, date: string): Promise<Transcript | null> {
+  const result = await docClient.send(
+    new GetCommand({
+      TableName: TABLE_NAME,
+      Key: {
+        PK: `TRANSCRIPT#${eventTicker}`,
+        SK: `DATE#${date}`,
+      },
+    })
+  );
+
+  return (result.Item as Transcript) || null;
+}
+
+export async function getTranscriptsForEvent(eventTicker: string): Promise<Transcript[]> {
+  const result = await docClient.send(
+    new QueryCommand({
+      TableName: TABLE_NAME,
+      KeyConditionExpression: 'PK = :pk',
+      ExpressionAttributeValues: {
+        ':pk': `TRANSCRIPT#${eventTicker}`,
+      },
+    })
+  );
+
+  return (result.Items as Transcript[]) || [];
+}
+
+export async function getAllTranscripts(): Promise<Transcript[]> {
+  // Scan with filter - no GSI (cost optimized per user requirement)
+  const result = await docClient.send(
+    new ScanCommand({
+      TableName: TABLE_NAME,
+      FilterExpression: 'begins_with(PK, :prefix)',
+      ExpressionAttributeValues: {
+        ':prefix': 'TRANSCRIPT#',
+      },
+    })
+  );
+
+  return (result.Items as Transcript[]) || [];
+}
+
+// Research Note Functions
+export async function saveNote(note: Omit<ResearchNote, 'PK' | 'SK' | 'createdAt' | 'updatedAt'>) {
+  const timestamp = Date.now();
+  const item: ResearchNote = {
+    PK: `NOTE#${note.eventTicker}`,
+    SK: `TIMESTAMP#${timestamp}`,
+    ...note,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  };
+
+  await docClient.send(
+    new PutCommand({
+      TableName: TABLE_NAME,
+      Item: item,
+    })
+  );
+
+  return item;
+}
+
+export async function getNotesForEvent(eventTicker: string): Promise<ResearchNote[]> {
+  const result = await docClient.send(
+    new QueryCommand({
+      TableName: TABLE_NAME,
+      KeyConditionExpression: 'PK = :pk',
+      ExpressionAttributeValues: {
+        ':pk': `NOTE#${eventTicker}`,
+      },
+      ScanIndexForward: false, // Newest first
+    })
+  );
+
+  return (result.Items as ResearchNote[]) || [];
+}
+
+export async function deleteNote(eventTicker: string, timestamp: string): Promise<void> {
+  await docClient.send(
+    new DeleteCommand({
+      TableName: TABLE_NAME,
+      Key: {
+        PK: `NOTE#${eventTicker}`,
+        SK: `TIMESTAMP#${timestamp}`,
+      },
+    })
+  );
+}
+
+// Bet Record Functions
+export async function saveBet(bet: Omit<BetRecord, 'PK' | 'SK' | 'createdAt'>) {
+  const item: BetRecord = {
+    PK: `BET#${bet.betId}`,
+    SK: 'METADATA',
+    ...bet,
+    createdAt: new Date().toISOString(),
+  };
+
+  await docClient.send(
+    new PutCommand({
+      TableName: TABLE_NAME,
+      Item: item,
+    })
+  );
+
+  return item;
+}
+
+export async function getBet(betId: string): Promise<BetRecord | null> {
+  const result = await docClient.send(
+    new GetCommand({
+      TableName: TABLE_NAME,
+      Key: {
+        PK: `BET#${betId}`,
+        SK: 'METADATA',
+      },
+    })
+  );
+
+  return (result.Item as BetRecord) || null;
+}
+
+export async function updateBetStatus(
+  betId: string,
+  status: BetRecord['status'],
+  orderId?: string
+): Promise<void> {
+  await docClient.send(
+    new UpdateCommand({
+      TableName: TABLE_NAME,
+      Key: {
+        PK: `BET#${betId}`,
+        SK: 'METADATA',
+      },
+      UpdateExpression: 'SET #status = :status, orderId = :orderId',
+      ExpressionAttributeNames: {
+        '#status': 'status',
+      },
+      ExpressionAttributeValues: {
+        ':status': status,
+        ':orderId': orderId || null,
+      },
+    })
+  );
+}
+
+export async function getAllBets(status?: BetRecord['status']): Promise<BetRecord[]> {
+  // Scan with filter - no GSI (cost optimized)
+  const params: any = {
+    TableName: TABLE_NAME,
+    FilterExpression: 'begins_with(PK, :prefix)',
+    ExpressionAttributeValues: {
+      ':prefix': 'BET#',
+    },
+  };
+
+  if (status) {
+    params.FilterExpression += ' AND #status = :status';
+    params.ExpressionAttributeNames = { '#status': 'status' };
+    params.ExpressionAttributeValues[':status'] = status;
+  }
+
+  const result = await docClient.send(new ScanCommand(params));
+  return (result.Items as BetRecord[]) || [];
+}
+
+// News Cache Functions
+export async function cacheNewsResults(word: string, articles: NewsCache['articles']) {
+  const sixHoursFromNow = Math.floor(Date.now() / 1000) + 6 * 60 * 60;
+  const date = new Date().toISOString().split('T')[0];
+
+  const item: NewsCache = {
+    PK: `NEWSCACHE#${word.toLowerCase()}`,
+    SK: `DATE#${date}`,
+    word: word.toLowerCase(),
+    articleCount: articles.length,
+    articles,
+    fetchedAt: new Date().toISOString(),
+    expiresAt: sixHoursFromNow,
+  };
+
+  await docClient.send(
+    new PutCommand({
+      TableName: TABLE_NAME,
+      Item: item,
+    })
+  );
+
+  return item;
+}
+
+export async function getCachedNews(word: string): Promise<NewsCache | null> {
+  const date = new Date().toISOString().split('T')[0];
+
+  const result = await docClient.send(
+    new GetCommand({
+      TableName: TABLE_NAME,
+      Key: {
+        PK: `NEWSCACHE#${word.toLowerCase()}`,
+        SK: `DATE#${date}`,
+      },
+    })
+  );
+
+  // Check if cache is still valid (not expired)
+  if (result.Item) {
+    const item = result.Item as NewsCache;
+    const now = Math.floor(Date.now() / 1000);
+    if (item.expiresAt > now) {
+      return item;
+    }
+  }
+
+  return null;
+}
