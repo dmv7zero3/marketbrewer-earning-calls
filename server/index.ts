@@ -11,6 +11,8 @@ import {
   getTranscript,
   getTranscriptsForEvent,
   getAllTranscripts,
+  updateTranscriptVerification,
+  getPendingTranscripts,
   saveNote,
   getNotesForEvent,
   deleteNote,
@@ -18,6 +20,12 @@ import {
   getBet,
   updateBetStatus,
   getAllBets,
+  saveEarningsEvent,
+  getEarningsEvent,
+  getEarningsEventsForCompany,
+  getAllEarningsEvents,
+  updateEarningsEventMarkets,
+  deleteEarningsEvent,
 } from './lib/dynamodb';
 import { fetchNewsForWord, fetchNewsForWords, getTrendingWords } from './lib/news';
 
@@ -160,6 +168,42 @@ app.get('/api/kalshi/markets/:ticker', async (req, res) => {
   res.status(result.status).json(result.data);
 });
 
+// List events
+app.get('/api/kalshi/events', async (req, res) => {
+  const queryString = new URLSearchParams(req.query as Record<string, string>).toString();
+  const endpoint = queryString ? `/events?${queryString}` : '/events';
+  const result = await kalshiRequest('GET', endpoint);
+  res.status(result.status).json(result.data);
+});
+
+// Get single event with all markets
+app.get('/api/kalshi/events/:eventTicker', async (req, res) => {
+  const result = await kalshiRequest('GET', `/events/${req.params.eventTicker}`);
+  res.status(result.status).json(result.data);
+});
+
+// Search events (used for earnings call discovery)
+app.get('/api/kalshi/events/search', async (req, res) => {
+  const queryString = new URLSearchParams(req.query as Record<string, string>).toString();
+  const endpoint = queryString ? `/events?${queryString}` : '/events';
+  const result = await kalshiRequest('GET', endpoint);
+  res.status(result.status).json(result.data);
+});
+
+// List series
+app.get('/api/kalshi/series', async (req, res) => {
+  const queryString = new URLSearchParams(req.query as Record<string, string>).toString();
+  const endpoint = queryString ? `/series?${queryString}` : '/series';
+  const result = await kalshiRequest('GET', endpoint);
+  res.status(result.status).json(result.data);
+});
+
+// Get single series
+app.get('/api/kalshi/series/:seriesTicker', async (req, res) => {
+  const result = await kalshiRequest('GET', `/series/${req.params.seriesTicker}`);
+  res.status(result.status).json(result.data);
+});
+
 // Place order
 app.post('/api/kalshi/portfolio/orders', async (req, res) => {
   const result = await kalshiRequest('POST', '/portfolio/orders', req.body);
@@ -181,7 +225,21 @@ app.get('/api/kalshi/portfolio/orders', async (req, res) => {
 // Save a transcript
 app.post('/api/transcripts', async (req, res) => {
   try {
-    const { eventTicker, company, date, quarter, year, content } = req.body;
+    const {
+      eventTicker,
+      company,
+      date,
+      quarter,
+      year,
+      content,
+      sourceUrl,
+      sourceTitle,
+      sourceDate,
+      sourceTicker,
+      parsedCompany,
+      parsedQuarter,
+      parsedEarningsDate,
+    } = req.body;
 
     if (!eventTicker || !company || !date || !quarter || !year || !content) {
       return res.status(400).json({ error: 'Missing required fields' });
@@ -197,6 +255,15 @@ app.post('/api/transcripts', async (req, res) => {
       year: parseInt(year),
       content,
       wordCount,
+      verificationStatus: 'pending', // New transcripts start as pending
+      // Optional source metadata
+      ...(sourceUrl && { sourceUrl }),
+      ...(sourceTitle && { sourceTitle }),
+      ...(sourceDate && { sourceDate }),
+      ...(sourceTicker && { sourceTicker }),
+      ...(parsedCompany && { parsedCompany }),
+      ...(parsedQuarter && { parsedQuarter }),
+      ...(parsedEarningsDate && { parsedEarningsDate }),
     });
 
     res.status(201).json(transcript);
@@ -239,6 +306,41 @@ app.get('/api/transcripts', async (req, res) => {
   } catch (error) {
     console.error('Error getting all transcripts:', error);
     res.status(500).json({ error: 'Failed to get transcripts' });
+  }
+});
+
+// Get pending (unverified) transcripts
+app.get('/api/transcripts/pending', async (req, res) => {
+  try {
+    const transcripts = await getPendingTranscripts();
+    res.json(transcripts);
+  } catch (error) {
+    console.error('Error getting pending transcripts:', error);
+    res.status(500).json({ error: 'Failed to get pending transcripts' });
+  }
+});
+
+// Verify or reject a transcript
+app.patch('/api/transcripts/:eventTicker/:date/verify', async (req, res) => {
+  try {
+    const { eventTicker, date } = req.params;
+    const { status, notes } = req.body;
+
+    if (!status || !['verified', 'rejected'].includes(status)) {
+      return res.status(400).json({ error: 'Invalid verification status' });
+    }
+
+    await updateTranscriptVerification(
+      decodeURIComponent(eventTicker),
+      decodeURIComponent(date),
+      status,
+      notes
+    );
+
+    res.json({ success: true, status });
+  } catch (error) {
+    console.error('Error verifying transcript:', error);
+    res.status(500).json({ error: 'Failed to verify transcript' });
   }
 });
 
@@ -414,6 +516,114 @@ app.post('/api/news/trending', async (req, res) => {
   } catch (error) {
     console.error('Error getting trending words:', error);
     res.status(500).json({ error: 'Failed to get trending words' });
+  }
+});
+
+// ===========================================
+// Earnings Events Endpoints
+// ===========================================
+
+// Get all earnings events (with optional status filter)
+app.get('/api/earnings', async (req, res) => {
+  try {
+    const status = req.query.status as string | undefined;
+    const events = await getAllEarningsEvents(status as any);
+    res.json(events);
+  } catch (error) {
+    console.error('Error getting earnings events:', error);
+    res.status(500).json({ error: 'Failed to get earnings events' });
+  }
+});
+
+// Get earnings events for a specific company
+app.get('/api/earnings/company/:company', async (req, res) => {
+  try {
+    const events = await getEarningsEventsForCompany(req.params.company);
+    res.json(events);
+  } catch (error) {
+    console.error('Error getting company earnings events:', error);
+    res.status(500).json({ error: 'Failed to get company earnings events' });
+  }
+});
+
+// Get a specific earnings event
+app.get('/api/earnings/:company/:eventTicker', async (req, res) => {
+  try {
+    const event = await getEarningsEvent(req.params.company, req.params.eventTicker);
+    if (!event) {
+      return res.status(404).json({ error: 'Earnings event not found' });
+    }
+    res.json(event);
+  } catch (error) {
+    console.error('Error getting earnings event:', error);
+    res.status(500).json({ error: 'Failed to get earnings event' });
+  }
+});
+
+// Create or update an earnings event
+app.post('/api/earnings', async (req, res) => {
+  try {
+    const { eventTicker, company, title, category, status, eventDate, closeTime, markets } = req.body;
+
+    if (!eventTicker || !company || !title) {
+      return res.status(400).json({ error: 'Missing required fields: eventTicker, company, title' });
+    }
+
+    const totalVolume = markets?.reduce((sum: number, m: any) => sum + (m.volume || 0), 0) || 0;
+
+    const event = await saveEarningsEvent({
+      eventTicker,
+      company,
+      title,
+      category: category || 'earnings-call',
+      status: status || 'active',
+      eventDate,
+      closeTime,
+      markets: markets || [],
+      totalVolume,
+      marketCount: markets?.length || 0,
+    });
+
+    res.status(201).json(event);
+  } catch (error) {
+    console.error('Error saving earnings event:', error);
+    res.status(500).json({ error: 'Failed to save earnings event' });
+  }
+});
+
+// Update markets for an earnings event
+app.patch('/api/earnings/:company/:eventTicker/markets', async (req, res) => {
+  try {
+    const { markets } = req.body;
+
+    if (!markets || !Array.isArray(markets)) {
+      return res.status(400).json({ error: 'Markets array is required' });
+    }
+
+    const totalVolume = markets.reduce((sum: number, m: any) => sum + (m.volume || 0), 0);
+
+    await updateEarningsEventMarkets(
+      req.params.company,
+      req.params.eventTicker,
+      markets,
+      totalVolume
+    );
+
+    res.status(200).json({ message: 'Markets updated' });
+  } catch (error) {
+    console.error('Error updating earnings event markets:', error);
+    res.status(500).json({ error: 'Failed to update markets' });
+  }
+});
+
+// Delete an earnings event
+app.delete('/api/earnings/:company/:eventTicker', async (req, res) => {
+  try {
+    await deleteEarningsEvent(req.params.company, req.params.eventTicker);
+    res.status(204).send();
+  } catch (error) {
+    console.error('Error deleting earnings event:', error);
+    res.status(500).json({ error: 'Failed to delete earnings event' });
   }
 });
 

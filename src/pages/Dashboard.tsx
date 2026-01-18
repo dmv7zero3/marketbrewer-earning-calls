@@ -3,18 +3,21 @@ import { Link } from 'react-router-dom';
 import {
   getBalance,
   getPositions,
-  getEarningsCallEvents,
-  type EarningsCallEvent,
   type KalshiBalance,
   type KalshiPosition,
 } from '@/lib/api/kalshi';
+import {
+  getAllEarningsEvents,
+  type EarningsEvent,
+} from '@/lib/api/data';
 
 function Dashboard() {
   const [balance, setBalance] = useState<KalshiBalance | null>(null);
   const [positions, setPositions] = useState<KalshiPosition[]>([]);
-  const [events, setEvents] = useState<EarningsCallEvent[]>([]);
+  const [events, setEvents] = useState<EarningsEvent[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [searchQuery, setSearchQuery] = useState('');
 
   useEffect(() => {
     async function fetchData() {
@@ -26,7 +29,7 @@ function Dashboard() {
         const [balanceData, positionsData, eventsData] = await Promise.all([
           getBalance().catch(() => null),
           getPositions().catch(() => []),
-          getEarningsCallEvents().catch(() => []),
+          getAllEarningsEvents().catch(() => []),
         ]);
 
         setBalance(balanceData);
@@ -45,17 +48,25 @@ function Dashboard() {
   // Calculate P&L from positions
   const totalPnl = positions.reduce((sum, p) => sum + p.realized_pnl, 0);
 
-  // Format date for display
-  const formatEventDate = (dateStr: string) => {
-    const date = new Date(dateStr);
-    return date.toLocaleDateString('en-US', {
-      weekday: 'short',
-      month: 'short',
-      day: 'numeric',
-      hour: 'numeric',
-      minute: '2-digit',
-    });
-  };
+  // Filter out past events (only show future dates)
+  const now = new Date();
+  const futureEvents = events.filter((event) => {
+    if (!event.eventDate) return true; // Keep events without dates
+    return new Date(event.eventDate) > now;
+  });
+
+  // Filter events by search query
+  const filteredEvents = futureEvents.filter((event) =>
+    event.company.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    event.title.toLowerCase().includes(searchQuery.toLowerCase())
+  );
+
+  // Sort events by nearest date first (events without dates go last)
+  const sortedEvents = [...filteredEvents].sort((a, b) => {
+    const dateA = a.eventDate ? new Date(a.eventDate).getTime() : Infinity;
+    const dateB = b.eventDate ? new Date(b.eventDate).getTime() : Infinity;
+    return dateA - dateB;
+  });
 
   return (
     <div className="max-w-7xl mx-auto px-4 py-8">
@@ -78,7 +89,7 @@ function Dashboard() {
       )}
 
       {/* Stats Row */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8">
         <div className="card">
           <p className="text-slate-400 text-sm mb-1">Portfolio Balance</p>
           {loading ? (
@@ -111,104 +122,110 @@ function Dashboard() {
             </p>
           )}
         </div>
+        <div className="card">
+          <p className="text-slate-400 text-sm mb-1">Upcoming Events</p>
+          {loading ? (
+            <div className="h-8 w-16 bg-slate-800 rounded animate-pulse" />
+          ) : (
+            <p className="text-2xl font-bold text-white">{futureEvents.length}</p>
+          )}
+        </div>
       </div>
 
       {/* Earnings Events List */}
       <section>
-        <div className="flex items-center justify-between mb-4">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-4">
           <h2 className="text-xl font-semibold text-white">
-            Upcoming Earnings Calls
+            Earnings Call Events
           </h2>
-          <span className="text-sm text-slate-500">
-            {events.length} events found
-          </span>
+          <div className="flex items-center gap-4">
+            <input
+              type="text"
+              placeholder="Search companies..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="px-3 py-2 bg-slate-800 border border-slate-700 rounded-lg text-white placeholder-slate-500 text-sm focus:outline-none focus:border-slate-600"
+            />
+            <span className="text-sm text-slate-500 whitespace-nowrap">
+              {filteredEvents.length} of {futureEvents.length} upcoming
+            </span>
+          </div>
         </div>
 
         {loading ? (
-          <div className="space-y-4">
-            {[1, 2, 3].map((i) => (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {[1, 2, 3, 4, 5, 6].map((i) => (
               <div key={i} className="card animate-pulse">
                 <div className="h-6 w-32 bg-slate-800 rounded mb-2" />
                 <div className="h-4 w-48 bg-slate-800 rounded mb-4" />
                 <div className="flex gap-2">
-                  <div className="h-8 w-24 bg-slate-800 rounded" />
-                  <div className="h-8 w-24 bg-slate-800 rounded" />
-                  <div className="h-8 w-24 bg-slate-800 rounded" />
+                  <div className="h-6 w-16 bg-slate-800 rounded" />
+                  <div className="h-6 w-16 bg-slate-800 rounded" />
                 </div>
               </div>
             ))}
           </div>
-        ) : events.length === 0 ? (
+        ) : sortedEvents.length === 0 ? (
           <div className="card text-center py-12">
-            <p className="text-slate-400 mb-2">No earnings call events found</p>
+            <p className="text-slate-400 mb-2">
+              {searchQuery ? 'No matching events found' : 'No earnings call events found'}
+            </p>
             <p className="text-slate-500 text-sm">
-              Check if the Kalshi API is connected and there are active earnings markets
+              {searchQuery ? 'Try a different search term' : 'Events will appear here when available'}
             </p>
           </div>
         ) : (
-          <div className="space-y-4">
-            {events.map((event) => {
-              // Get top 3 words by implied probability
-              const topWords = event.markets
-                .map((m) => ({
-                  word: m.yes_sub_title || m.subtitle || m.ticker.split('-').pop() || '',
-                  chance: Math.round((m.yes_bid || m.last_price) * 100),
-                  yesPrice: Math.round((m.yes_bid || m.last_price) * 100),
-                  volume: m.volume,
-                }))
-                .sort((a, b) => b.chance - a.chance)
-                .slice(0, 3);
-
-              return (
-                <Link
-                  key={event.eventTicker}
-                  to={`/earnings/${encodeURIComponent(event.eventTicker)}`}
-                  className="card block hover:border-slate-700 transition-colors"
-                >
-                  <div className="flex items-start justify-between mb-3">
-                    <div>
-                      <div className="flex items-center gap-3 mb-1">
-                        <span className="text-lg font-bold text-white">
-                          {event.company}
-                        </span>
-                        <span className="px-2 py-0.5 text-xs bg-slate-800 text-slate-400 rounded">
-                          {event.markets.length} words
-                        </span>
-                      </div>
-                      <p className="text-sm text-slate-500">
-                        {formatEventDate(event.eventDate)}
-                      </p>
-                    </div>
-                    <div className="text-right">
-                      <p className="text-xs text-slate-500">Volume</p>
-                      <p className="text-sm font-mono text-slate-300">
-                        ${event.totalVolume.toLocaleString()}
-                      </p>
-                    </div>
-                  </div>
-
-                  {/* Top Words Preview */}
-                  <div className="flex flex-wrap gap-2">
-                    {topWords.map((word, idx) => (
-                      <div
-                        key={idx}
-                        className="flex items-center gap-2 px-3 py-1.5 bg-slate-800 rounded-lg"
-                      >
-                        <span className="text-sm text-white">{word.word}</span>
-                        <span className="text-xs font-mono text-profit-400">
-                          {word.chance}%
-                        </span>
-                      </div>
-                    ))}
-                    {event.markets.length > 3 && (
-                      <div className="px-3 py-1.5 text-xs text-slate-500">
-                        +{event.markets.length - 3} more
-                      </div>
-                    )}
-                  </div>
-                </Link>
-              );
-            })}
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {sortedEvents.map((event) => (
+              <Link
+                key={event.eventTicker}
+                to={`/earnings/${encodeURIComponent(event.company)}/${encodeURIComponent(event.eventTicker)}`}
+                className="card block hover:border-slate-600 transition-colors"
+              >
+                <div className="flex items-start justify-between mb-2">
+                  <span className="text-lg font-bold text-white">
+                    {event.company}
+                  </span>
+                  <span
+                    className={`px-2 py-0.5 text-xs rounded ${
+                      event.status === 'active'
+                        ? 'bg-profit-500/20 text-profit-400'
+                        : event.status === 'upcoming'
+                        ? 'bg-blue-500/20 text-blue-400'
+                        : 'bg-slate-700 text-slate-400'
+                    }`}
+                  >
+                    {event.status}
+                  </span>
+                </div>
+                <p className="text-sm text-slate-500 mb-2 line-clamp-2">
+                  {event.title}
+                </p>
+                {event.eventDate && (
+                  <p className="text-xs text-blue-400 mb-3">
+                    {new Date(event.eventDate).toLocaleDateString('en-US', {
+                      weekday: 'short',
+                      month: 'short',
+                      day: 'numeric',
+                      hour: 'numeric',
+                      minute: '2-digit',
+                    })}
+                  </p>
+                )}
+                <div className="flex items-center justify-between text-xs">
+                  <span className="text-slate-500">
+                    {event.marketCount > 0
+                      ? `${event.marketCount} word bets`
+                      : 'No word bets yet'}
+                  </span>
+                  {event.totalVolume > 0 && (
+                    <span className="font-mono text-slate-400">
+                      ${event.totalVolume.toLocaleString()} vol
+                    </span>
+                  )}
+                </div>
+              </Link>
+            ))}
           </div>
         )}
       </section>

@@ -34,6 +34,23 @@ export interface Transcript {
   wordCount: number;
   createdAt: string;
   expiresAt?: number; // TTL (optional)
+
+  // Source metadata (for verification)
+  sourceUrl?: string; // Original URL (e.g., Seeking Alpha)
+  sourceTitle?: string; // Title from source page
+  sourceDate?: string; // Date string from source page
+  sourceTicker?: string; // Ticker symbol from source
+
+  // Verification fields
+  verificationStatus: 'pending' | 'verified' | 'rejected';
+  verifiedAt?: string;
+  verifiedBy?: string; // 'user' or 'auto'
+  verificationNotes?: string;
+
+  // Parsed/normalized data for comparison
+  parsedCompany?: string; // Company name extracted from source
+  parsedQuarter?: string; // Quarter extracted from source (e.g., "Q4 2025")
+  parsedEarningsDate?: string; // Actual earnings call date from source
 }
 
 export interface ResearchNote {
@@ -80,6 +97,34 @@ export interface NewsCache {
   }>;
   fetchedAt: string;
   expiresAt: number; // TTL - 6 hours
+}
+
+export interface EarningsEvent {
+  PK: string; // EARNINGS#{company}
+  SK: string; // EVENT#{eventTicker}
+  eventTicker: string;
+  seriesTicker?: string;
+  company: string;
+  stockTicker?: string; // Stock market ticker (e.g., AAPL, GOOGL)
+  title: string;
+  category: string;
+  status: 'upcoming' | 'active' | 'closed' | 'settled';
+  eventDate?: string;
+  closeTime?: string;
+  seekingAlphaUrl?: string; // URL to Seeking Alpha earnings transcripts page
+  markets: Array<{
+    ticker: string;
+    word: string;
+    yesPrice: number;
+    noPrice: number;
+    lastPrice: number;
+    volume: number;
+    status: string;
+  }>;
+  totalVolume: number;
+  marketCount: number;
+  createdAt: string;
+  updatedAt: string;
 }
 
 // Transcript Functions
@@ -137,6 +182,54 @@ export async function getAllTranscripts(): Promise<Transcript[]> {
       FilterExpression: 'begins_with(PK, :prefix)',
       ExpressionAttributeValues: {
         ':prefix': 'TRANSCRIPT#',
+      },
+    })
+  );
+
+  return (result.Items as Transcript[]) || [];
+}
+
+export async function updateTranscriptVerification(
+  eventTicker: string,
+  date: string,
+  status: Transcript['verificationStatus'],
+  notes?: string
+): Promise<void> {
+  const updateExpr = notes
+    ? 'SET verificationStatus = :status, verifiedAt = :verifiedAt, verifiedBy = :verifiedBy, verificationNotes = :notes'
+    : 'SET verificationStatus = :status, verifiedAt = :verifiedAt, verifiedBy = :verifiedBy';
+
+  const exprValues: Record<string, unknown> = {
+    ':status': status,
+    ':verifiedAt': new Date().toISOString(),
+    ':verifiedBy': 'user',
+  };
+
+  if (notes) {
+    exprValues[':notes'] = notes;
+  }
+
+  await docClient.send(
+    new UpdateCommand({
+      TableName: TABLE_NAME,
+      Key: {
+        PK: `TRANSCRIPT#${eventTicker}`,
+        SK: `DATE#${date}`,
+      },
+      UpdateExpression: updateExpr,
+      ExpressionAttributeValues: exprValues,
+    })
+  );
+}
+
+export async function getPendingTranscripts(): Promise<Transcript[]> {
+  const result = await docClient.send(
+    new ScanCommand({
+      TableName: TABLE_NAME,
+      FilterExpression: 'begins_with(PK, :prefix) AND verificationStatus = :status',
+      ExpressionAttributeValues: {
+        ':prefix': 'TRANSCRIPT#',
+        ':status': 'pending',
       },
     })
   );
@@ -317,4 +410,114 @@ export async function getCachedNews(word: string): Promise<NewsCache | null> {
   }
 
   return null;
+}
+
+// Earnings Event Functions
+export async function saveEarningsEvent(
+  event: Omit<EarningsEvent, 'PK' | 'SK' | 'createdAt' | 'updatedAt'>
+): Promise<EarningsEvent> {
+  const now = new Date().toISOString();
+  const item: EarningsEvent = {
+    PK: `EARNINGS#${event.company.toUpperCase()}`,
+    SK: `EVENT#${event.eventTicker}`,
+    ...event,
+    createdAt: now,
+    updatedAt: now,
+  };
+
+  await docClient.send(
+    new PutCommand({
+      TableName: TABLE_NAME,
+      Item: item,
+    })
+  );
+
+  return item;
+}
+
+export async function getEarningsEvent(
+  company: string,
+  eventTicker: string
+): Promise<EarningsEvent | null> {
+  const result = await docClient.send(
+    new GetCommand({
+      TableName: TABLE_NAME,
+      Key: {
+        PK: `EARNINGS#${company.toUpperCase()}`,
+        SK: `EVENT#${eventTicker}`,
+      },
+    })
+  );
+
+  return (result.Item as EarningsEvent) || null;
+}
+
+export async function getEarningsEventsForCompany(company: string): Promise<EarningsEvent[]> {
+  const result = await docClient.send(
+    new QueryCommand({
+      TableName: TABLE_NAME,
+      KeyConditionExpression: 'PK = :pk',
+      ExpressionAttributeValues: {
+        ':pk': `EARNINGS#${company.toUpperCase()}`,
+      },
+      ScanIndexForward: false, // Newest first
+    })
+  );
+
+  return (result.Items as EarningsEvent[]) || [];
+}
+
+export async function getAllEarningsEvents(status?: EarningsEvent['status']): Promise<EarningsEvent[]> {
+  const params: any = {
+    TableName: TABLE_NAME,
+    FilterExpression: 'begins_with(PK, :prefix)',
+    ExpressionAttributeValues: {
+      ':prefix': 'EARNINGS#',
+    },
+  };
+
+  if (status) {
+    params.FilterExpression += ' AND #status = :status';
+    params.ExpressionAttributeNames = { '#status': 'status' };
+    params.ExpressionAttributeValues[':status'] = status;
+  }
+
+  const result = await docClient.send(new ScanCommand(params));
+  return (result.Items as EarningsEvent[]) || [];
+}
+
+export async function updateEarningsEventMarkets(
+  company: string,
+  eventTicker: string,
+  markets: EarningsEvent['markets'],
+  totalVolume: number
+): Promise<void> {
+  await docClient.send(
+    new UpdateCommand({
+      TableName: TABLE_NAME,
+      Key: {
+        PK: `EARNINGS#${company.toUpperCase()}`,
+        SK: `EVENT#${eventTicker}`,
+      },
+      UpdateExpression: 'SET markets = :markets, totalVolume = :volume, marketCount = :count, updatedAt = :updatedAt',
+      ExpressionAttributeValues: {
+        ':markets': markets,
+        ':volume': totalVolume,
+        ':count': markets.length,
+        ':updatedAt': new Date().toISOString(),
+      },
+    })
+  );
+}
+
+export async function deleteEarningsEvent(company: string, eventTicker: string): Promise<void> {
+  await docClient.send(
+    new DeleteCommand({
+      TableName: TABLE_NAME,
+      Key: {
+        PK: `EARNINGS#${company.toUpperCase()}`,
+        SK: `EVENT#${eventTicker}`,
+      },
+    })
+  );
 }

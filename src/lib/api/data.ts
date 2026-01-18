@@ -15,6 +15,23 @@ export interface Transcript {
   content: string;
   wordCount: number;
   createdAt: string;
+
+  // Source metadata (for verification)
+  sourceUrl?: string;
+  sourceTitle?: string;
+  sourceDate?: string;
+  sourceTicker?: string;
+
+  // Verification fields
+  verificationStatus: 'pending' | 'verified' | 'rejected';
+  verifiedAt?: string;
+  verifiedBy?: string;
+  verificationNotes?: string;
+
+  // Parsed/normalized data
+  parsedCompany?: string;
+  parsedQuarter?: string;
+  parsedEarningsDate?: string;
 }
 
 export interface ResearchNote {
@@ -59,6 +76,34 @@ export interface NewsResult {
     publishedAt: string;
   }>;
   cached: boolean;
+}
+
+export interface EarningsEvent {
+  PK: string;
+  SK: string;
+  eventTicker: string;
+  seriesTicker?: string;
+  company: string;
+  stockTicker?: string;
+  title: string;
+  category: string;
+  status: 'upcoming' | 'active' | 'closed' | 'settled';
+  eventDate?: string;
+  closeTime?: string;
+  seekingAlphaUrl?: string;
+  markets: Array<{
+    ticker: string;
+    word: string;
+    yesPrice: number;
+    noPrice: number;
+    lastPrice: number;
+    volume: number;
+    status: string;
+  }>;
+  totalVolume: number;
+  marketCount: number;
+  createdAt: string;
+  updatedAt: string;
 }
 
 // Helper function
@@ -116,6 +161,22 @@ export async function getTranscriptsForCompany(eventTicker: string): Promise<Tra
 
 export async function getAllTranscripts(): Promise<Transcript[]> {
   return fetchApi('/transcripts');
+}
+
+export async function getPendingTranscripts(): Promise<Transcript[]> {
+  return fetchApi('/transcripts/pending');
+}
+
+export async function verifyTranscript(
+  eventTicker: string,
+  date: string,
+  status: 'verified' | 'rejected',
+  notes?: string
+): Promise<void> {
+  await fetchApi(`/transcripts/${encodeURIComponent(eventTicker)}/${encodeURIComponent(date)}/verify`, {
+    method: 'PATCH',
+    body: JSON.stringify({ status, notes }),
+  });
 }
 
 // ===========================================
@@ -207,6 +268,54 @@ export async function getTrendingWords(words: string[], company?: string): Promi
     body: JSON.stringify({ words, company }),
   });
   return result.trending;
+}
+
+// ===========================================
+// Earnings Events Functions
+// ===========================================
+
+export async function getAllEarningsEvents(status?: string): Promise<EarningsEvent[]> {
+  const query = status ? `?status=${encodeURIComponent(status)}` : '';
+  return fetchApi(`/earnings${query}`);
+}
+
+export async function getEarningsEventsForCompany(company: string): Promise<EarningsEvent[]> {
+  return fetchApi(`/earnings/company/${encodeURIComponent(company)}`);
+}
+
+export async function getEarningsEvent(company: string, eventTicker: string): Promise<EarningsEvent | null> {
+  try {
+    return await fetchApi(`/earnings/${encodeURIComponent(company)}/${encodeURIComponent(eventTicker)}`);
+  } catch {
+    return null;
+  }
+}
+
+export async function saveEarningsEvent(data: {
+  eventTicker: string;
+  company: string;
+  title: string;
+  category?: string;
+  status?: string;
+  eventDate?: string;
+  closeTime?: string;
+  markets?: EarningsEvent['markets'];
+}): Promise<EarningsEvent> {
+  return fetchApi('/earnings', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}
+
+export async function updateEarningsMarkets(
+  company: string,
+  eventTicker: string,
+  markets: EarningsEvent['markets']
+): Promise<void> {
+  await fetchApi(`/earnings/${encodeURIComponent(company)}/${encodeURIComponent(eventTicker)}/markets`, {
+    method: 'PATCH',
+    body: JSON.stringify({ markets }),
+  });
 }
 
 // ===========================================

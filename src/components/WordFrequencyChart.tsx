@@ -103,6 +103,36 @@ export function WordFrequencyChart({
       .attr('font-weight', 'bold')
       .text((d) => d.count);
 
+    // Tooltip
+    const tooltip = d3
+      .select(containerRef.current)
+      .append('div')
+      .attr('class', 'absolute bg-slate-900 border border-slate-700 rounded px-2 py-1 text-xs pointer-events-none opacity-0 transition-opacity z-10')
+      .style('position', 'absolute');
+
+    // Add hover interaction to bars
+    g.selectAll<SVGRectElement, WordCount>('.bar')
+      .on('mouseover', function (_event, d) {
+        d3.select(this).attr('opacity', 0.8);
+        tooltip
+          .style('opacity', 1)
+          .html(
+            `<div class="text-white font-semibold">${d.word}</div>` +
+            `<div class="text-slate-400">Count: <span class="text-white">${d.count}</span></div>` +
+            (d.inNews ? `<div class="text-yellow-400">Trending in news</div>` : '')
+          );
+      })
+      .on('mousemove', function (event) {
+        const [mouseX, mouseY] = d3.pointer(event, containerRef.current);
+        tooltip
+          .style('left', `${mouseX + 10}px`)
+          .style('top', `${mouseY - 10}px`);
+      })
+      .on('mouseout', function () {
+        d3.select(this).attr('opacity', 1);
+        tooltip.style('opacity', 0);
+      });
+
     // X axis with rotated labels
     g.append('g')
       .attr('transform', `translate(0,${chartHeight})`)
@@ -124,10 +154,15 @@ export function WordFrequencyChart({
       .selectAll('text')
       .attr('fill', '#94a3b8')
       .attr('font-size', '10px');
+
+    // Cleanup tooltip on unmount
+    return () => {
+      tooltip.remove();
+    };
   }, [data, height]);
 
   return (
-    <div ref={containerRef} className="w-full">
+    <div ref={containerRef} className="w-full relative">
       <div className="flex items-center justify-between mb-2">
         <h3 className="text-sm font-semibold text-slate-300">{title}</h3>
         <div className="flex items-center gap-4 text-xs">

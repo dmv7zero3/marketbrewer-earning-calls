@@ -7,7 +7,7 @@ function App() {
     <div className="min-h-screen bg-slate-950">
       <Routes>
         <Route path="/" element={<Dashboard />} />
-        <Route path="/earnings/:eventTicker" element={<EarningsCallDetail />} />
+        <Route path="/earnings/:company/:eventTicker" element={<EarningsCallDetail />} />
       </Routes>
     </div>
   );

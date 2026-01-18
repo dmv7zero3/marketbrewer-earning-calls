@@ -9,19 +9,24 @@ import {
   getQuarterOptions,
   getYearOptions,
 } from '@/lib/utils/wordAnalysis';
+import { TranscriptVerification, VerificationBadge } from './TranscriptVerification';
 
 interface TranscriptsTabProps {
   eventTicker: string;
   companyName: string;
+  stockTicker?: string;
   transcripts: Transcript[];
   onTranscriptSaved: (transcript: Transcript) => void;
+  onTranscriptUpdated?: (transcript: Transcript) => void;
 }
 
 export function TranscriptsTab({
   eventTicker,
   companyName,
+  stockTicker,
   transcripts,
   onTranscriptSaved,
+  onTranscriptUpdated,
 }: TranscriptsTabProps) {
   // Form state
   const [newTranscript, setNewTranscript] = useState('');
@@ -32,6 +37,9 @@ export function TranscriptsTab({
   // Search state
   const [searchWord, setSearchWord] = useState('');
   const [expandedTranscript, setExpandedTranscript] = useState<string | null>(null);
+
+  // Verification state
+  const [verifyingTranscript, setVerifyingTranscript] = useState<Transcript | null>(null);
 
   // Options
   const quarterOptions = getQuarterOptions();
@@ -67,8 +75,56 @@ export function TranscriptsTab({
     ? transcripts.reduce((sum, t) => sum + countOccurrences(t.content, searchWord), 0)
     : 0;
 
+  // Handle verification complete
+  const handleVerificationComplete = (status: 'verified' | 'rejected') => {
+    if (verifyingTranscript && onTranscriptUpdated) {
+      onTranscriptUpdated({
+        ...verifyingTranscript,
+        verificationStatus: status,
+        verifiedAt: new Date().toISOString(),
+      });
+    }
+    setVerifyingTranscript(null);
+  };
+
+  // Get pending transcripts count
+  const pendingCount = transcripts.filter((t) => t.verificationStatus === 'pending').length;
+
   return (
     <div className="space-y-6">
+      {/* Verification Modal */}
+      {verifyingTranscript && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+            <TranscriptVerification
+              transcript={verifyingTranscript}
+              expectedCompany={companyName}
+              expectedTicker={stockTicker}
+              expectedQuarter={`${selectedQuarter} ${selectedYear}`}
+              onVerified={handleVerificationComplete}
+              onCancel={() => setVerifyingTranscript(null)}
+            />
+          </div>
+        </div>
+      )}
+
+      {/* Pending Verification Alert */}
+      {pendingCount > 0 && (
+        <div className="card bg-yellow-500/10 border border-yellow-500/30">
+          <div className="flex items-center gap-3">
+            <span className="text-yellow-400 text-xl">⚠</span>
+            <div>
+              <p className="text-yellow-400 font-medium">
+                {pendingCount} transcript{pendingCount > 1 ? 's' : ''} pending verification
+              </p>
+              <p className="text-sm text-slate-400">
+                Click "Verify" on a transcript to confirm accuracy before using for analysis.
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Upload Transcript */}
       <div className="card">
         <h2 className="text-lg font-semibold text-white mb-4">
@@ -168,6 +224,7 @@ export function TranscriptsTab({
                 onToggle={() =>
                   setExpandedTranscript(expandedTranscript === t.SK ? null : t.SK)
                 }
+                onVerify={() => setVerifyingTranscript(t)}
               />
             ))}
           </div>
@@ -183,6 +240,7 @@ interface TranscriptCardProps {
   searchWord: string;
   isExpanded: boolean;
   onToggle: () => void;
+  onVerify: () => void;
 }
 
 function TranscriptCard({
@@ -190,25 +248,57 @@ function TranscriptCard({
   searchWord,
   isExpanded,
   onToggle,
+  onVerify,
 }: TranscriptCardProps) {
   return (
     <div className="bg-slate-800 rounded-lg p-4">
       <div className="flex items-center justify-between mb-2">
-        <div>
+        <div className="flex items-center gap-3">
           <span className="font-semibold text-white">
             {transcript.quarter} {transcript.year}
           </span>
-          <span className="text-slate-500 text-sm ml-2">
+          <VerificationBadge status={transcript.verificationStatus} />
+          <span className="text-slate-500 text-sm">
             {transcript.wordCount.toLocaleString()} words
           </span>
         </div>
-        <button
-          onClick={onToggle}
-          className="text-xs text-slate-400 hover:text-white transition-colors"
-        >
-          {isExpanded ? 'Collapse' : 'Expand'}
-        </button>
+        <div className="flex items-center gap-2">
+          {transcript.verificationStatus === 'pending' && (
+            <button
+              onClick={onVerify}
+              className="text-xs px-2 py-1 bg-yellow-500/20 text-yellow-400 rounded hover:bg-yellow-500/30 transition-colors"
+            >
+              Verify
+            </button>
+          )}
+          <button
+            onClick={onToggle}
+            className="text-xs text-slate-400 hover:text-white transition-colors"
+          >
+            {isExpanded ? 'Collapse' : 'Expand'}
+          </button>
+        </div>
       </div>
+
+      {/* Source info */}
+      {transcript.sourceUrl && (
+        <div className="mb-2 text-xs text-slate-500">
+          <a
+            href={transcript.sourceUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-blue-400 hover:text-blue-300"
+          >
+            View source
+          </a>
+          {transcript.verifiedAt && (
+            <span className="ml-2">
+              • Verified {new Date(transcript.verifiedAt).toLocaleDateString()}
+            </span>
+          )}
+        </div>
+      )}
+
       {isExpanded && (
         <div
           className="mt-3 p-3 bg-slate-900 rounded text-sm font-mono whitespace-pre-wrap max-h-96 overflow-y-auto"

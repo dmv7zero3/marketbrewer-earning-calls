@@ -19,11 +19,13 @@ import {
 type TabId = 'market' | 'transcripts' | 'notes' | 'history';
 
 function EarningsCallDetail() {
-  const { eventTicker } = useParams<{ eventTicker: string }>();
+  const { company, eventTicker } = useParams<{ company: string; eventTicker: string }>();
+  const decodedCompany = company ? decodeURIComponent(company) : '';
   const decodedEventTicker = eventTicker ? decodeURIComponent(eventTicker) : '';
 
   // Fetch all earnings data using custom hook
   const {
+    earningsEvent,
     markets,
     wordBets,
     loading,
@@ -37,7 +39,7 @@ function EarningsCallDetail() {
     quarterlyAnalysis,
     newsData,
     loadingNews,
-  } = useEarningsData(decodedEventTicker);
+  } = useEarningsData(decodedCompany, decodedEventTicker);
 
   // UI state
   const [activeTab, setActiveTab] = useState<TabId>('market');
@@ -82,6 +84,13 @@ function EarningsCallDetail() {
     setNotes(notes.filter((n) => n.SK !== note.SK));
   };
 
+  // Handle transcript updated (verification status change)
+  const handleTranscriptUpdated = (updatedTranscript: Transcript) => {
+    setTranscripts(
+      transcripts.map((t) => (t.SK === updatedTranscript.SK ? updatedTranscript : t))
+    );
+  };
+
   // Tab configuration
   const tabs: { id: TabId; label: string }[] = [
     { id: 'market', label: 'Word Bets' },
@@ -105,18 +114,55 @@ function EarningsCallDetail() {
 
       {/* Header */}
       <header className="mb-6">
-        <p className="text-xs text-slate-500 uppercase tracking-wide mb-1">Mentions</p>
+        <div className="flex items-center gap-2 mb-1">
+          <p className="text-xs text-slate-500 uppercase tracking-wide">Mentions</p>
+          {earningsEvent?.stockTicker && (
+            <span className="text-xs font-mono text-blue-400 bg-blue-500/10 px-2 py-0.5 rounded">
+              ${earningsEvent.stockTicker}
+            </span>
+          )}
+        </div>
         <h1 className="text-2xl font-bold text-white mb-2">
           What will {companyName} say during their next earnings call?
         </h1>
-        <div className="flex items-center gap-4 text-sm text-slate-400">
-          <span>{markets.length} words available</span>
+        <div className="flex flex-wrap items-center gap-4 text-sm text-slate-400">
+          <span>{wordBets.length} words available</span>
           <span>·</span>
           <span>
             ${wordBets.reduce((sum, b) => sum + b.volume, 0).toLocaleString()} total volume
           </span>
           <span>·</span>
           <span>{transcripts.length} transcripts saved</span>
+          {earningsEvent?.eventDate && (
+            <>
+              <span>·</span>
+              <span className="text-blue-400">
+                {new Date(earningsEvent.eventDate).toLocaleDateString('en-US', {
+                  weekday: 'short',
+                  month: 'short',
+                  day: 'numeric',
+                  hour: 'numeric',
+                  minute: '2-digit',
+                })}
+              </span>
+            </>
+          )}
+          {earningsEvent?.seekingAlphaUrl && (
+            <>
+              <span>·</span>
+              <a
+                href={earningsEvent.seekingAlphaUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1 text-profit-400 hover:text-profit-300 transition-colors"
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                </svg>
+                Seeking Alpha Transcripts
+              </a>
+            </>
+          )}
         </div>
       </header>
 
@@ -149,7 +195,7 @@ function EarningsCallDetail() {
         <div className="lg:col-span-2 space-y-6">
           {/* Word Bets Tab */}
           {activeTab === 'market' && (
-            <>
+            <div key={`market-tab-${decodedEventTicker}`}>
               <WordBetsTable
                 wordBets={wordBets}
                 loading={loading}
@@ -172,7 +218,7 @@ function EarningsCallDetail() {
                   />
                 </div>
               )}
-            </>
+            </div>
           )}
 
           {/* Transcripts Tab */}
@@ -180,8 +226,10 @@ function EarningsCallDetail() {
             <TranscriptsTab
               eventTicker={decodedEventTicker}
               companyName={companyName}
+              stockTicker={earningsEvent?.stockTicker}
               transcripts={transcripts}
               onTranscriptSaved={handleTranscriptSaved}
+              onTranscriptUpdated={handleTranscriptUpdated}
             />
           )}
 

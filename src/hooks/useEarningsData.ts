@@ -1,5 +1,5 @@
 // Custom hook for fetching earnings call data
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { getMarkets, type KalshiMarket } from '@/lib/api/kalshi';
 import {
   getTranscriptsForCompany,
@@ -7,13 +7,15 @@ import {
   getAllBets,
   getNewsForWords,
   getHistoricalAnalysis,
+  getEarningsEvent,
   type Transcript,
   type ResearchNote,
   type BetRecord,
   type NewsResult,
   type QuarterlyAnalysis,
+  type EarningsEvent,
 } from '@/lib/api/data';
-import { extractCompanyName, countOccurrences } from '@/lib/utils/wordAnalysis';
+import { countOccurrences } from '@/lib/utils/wordAnalysis';
 
 // Word bet with all analysis data
 export interface WordBet {
@@ -30,6 +32,9 @@ export interface WordBet {
 }
 
 interface UseEarningsDataResult {
+  // Event data
+  earningsEvent: EarningsEvent | null;
+
   // Market data
   markets: KalshiMarket[];
   wordBets: WordBet[];
@@ -61,7 +66,10 @@ interface UseEarningsDataResult {
   refreshNews: () => Promise<void>;
 }
 
-export function useEarningsData(eventTicker: string): UseEarningsDataResult {
+export function useEarningsData(company: string, eventTicker: string): UseEarningsDataResult {
+  // Earnings event from DynamoDB
+  const [earningsEvent, setEarningsEvent] = useState<EarningsEvent | null>(null);
+
   // Market data
   const [markets, setMarkets] = useState<KalshiMarket[]>([]);
   const [loading, setLoading] = useState(true);
@@ -77,12 +85,26 @@ export function useEarningsData(eventTicker: string): UseEarningsDataResult {
   const [newsData, setNewsData] = useState<Record<string, NewsResult>>({});
   const [loadingNews, setLoadingNews] = useState(false);
 
-  // Derived company name
-  const companyName = markets[0]
-    ? extractCompanyName(markets[0].title, eventTicker)
-    : eventTicker;
+  // Company name from event or fallback
+  const companyName = earningsEvent?.company || company || eventTicker;
 
-  // Fetch markets from Kalshi
+  // Fetch earnings event from DynamoDB
+  useEffect(() => {
+    async function fetchEarningsEvent() {
+      if (!company || !eventTicker) return;
+
+      try {
+        const event = await getEarningsEvent(company, eventTicker);
+        setEarningsEvent(event);
+      } catch (err) {
+        console.error('Failed to fetch earnings event:', err);
+      }
+    }
+
+    fetchEarningsEvent();
+  }, [company, eventTicker]);
+
+  // Fetch markets from Kalshi (if event has a series ticker)
   useEffect(() => {
     async function fetchMarkets() {
       if (!eventTicker) return;
@@ -91,13 +113,16 @@ export function useEarningsData(eventTicker: string): UseEarningsDataResult {
       setError(null);
 
       try {
+        // Try to fetch markets from Kalshi using event ticker
         const { markets: allMarkets } = await getMarkets({
           event_ticker: eventTicker,
           status: 'open',
         });
         setMarkets(allMarkets);
       } catch (err) {
-        setError(err instanceof Error ? err.message : 'Failed to fetch markets');
+        // If no markets found, that's okay - we still have the event data
+        console.log('No Kalshi markets found for event:', eventTicker);
+        setMarkets([]);
       } finally {
         setLoading(false);
       }
@@ -131,15 +156,34 @@ export function useEarningsData(eventTicker: string): UseEarningsDataResult {
     fetchPersistedData();
   }, [eventTicker]);
 
-  // Fetch news for words
+  // Track if news has been fetched for this event to prevent infinite loops
+  const newsFetchedRef = useRef(false);
+  const lastEventTickerRef = useRef<string>('');
+
+  // Reset news fetched flag when event changes
+  useEffect(() => {
+    if (eventTicker !== lastEventTickerRef.current) {
+      newsFetchedRef.current = false;
+      lastEventTickerRef.current = eventTicker;
+    }
+  }, [eventTicker]);
+
+  // Fetch news for words - manual refresh function
   const refreshNews = useCallback(async () => {
-    if (markets.length === 0) return;
+    // Get words from Kalshi markets or earnings event markets
+    let words: string[] = [];
+    if (markets.length > 0) {
+      words = markets.map(
+        (m) => m.yes_sub_title || m.subtitle || m.ticker.split('-').pop() || ''
+      );
+    } else if (earningsEvent?.markets?.length) {
+      words = earningsEvent.markets.map((m) => m.word);
+    }
+
+    if (words.length === 0) return;
 
     setLoadingNews(true);
     try {
-      const words = markets.map(
-        (m) => m.yes_sub_title || m.subtitle || m.ticker.split('-').pop() || ''
-      );
       const news = await getNewsForWords(words, companyName);
       setNewsData(news);
     } catch (err) {
@@ -147,42 +191,75 @@ export function useEarningsData(eventTicker: string): UseEarningsDataResult {
     } finally {
       setLoadingNews(false);
     }
-  }, [markets, companyName]);
+  }, [markets, earningsEvent?.markets, companyName]);
 
-  // Auto-fetch news when markets load
+  // Auto-fetch news once when we have word data
   useEffect(() => {
-    refreshNews();
-  }, [refreshNews]);
+    const hasKalshiMarkets = markets.length > 0;
+    const hasEventMarkets = (earningsEvent?.markets?.length ?? 0) > 0;
+    const hasWords = hasKalshiMarkets || hasEventMarkets;
+
+    // Only fetch if we have words and haven't fetched yet
+    if (hasWords && !newsFetchedRef.current && !loading) {
+      newsFetchedRef.current = true;
+      refreshNews();
+    }
+  }, [markets.length, earningsEvent?.markets?.length, loading, refreshNews]);
 
   // Convert markets to word bets with analysis
-  const wordBets: WordBet[] = markets.map((m) => {
-    const word = m.yes_sub_title || m.subtitle || m.ticker.split('-').pop() || '';
-    const yesPrice = Math.round((m.yes_bid || m.last_price || 0) * 100);
-    const prevPrice = Math.round((m.previous_price || m.last_price || 0) * 100);
+  // Use Kalshi markets if available, otherwise use earnings event markets from DynamoDB
+  const wordBets: WordBet[] = markets.length > 0
+    ? markets.map((m) => {
+        const word = m.yes_sub_title || m.subtitle || m.ticker.split('-').pop() || '';
+        const yesPrice = Math.round((m.yes_bid || m.last_price || 0) * 100);
+        const prevPrice = Math.round((m.previous_price || m.last_price || 0) * 100);
 
-    // Count word in transcripts
-    const transcriptCount = transcripts.reduce((sum, t) => {
-      return sum + countOccurrences(t.content, word);
-    }, 0);
+        // Count word in transcripts
+        const transcriptCount = transcripts.reduce((sum, t) => {
+          return sum + countOccurrences(t.content, word);
+        }, 0);
 
-    // Get news data
-    const news = newsData[word.toLowerCase()];
+        // Get news data
+        const news = newsData[word.toLowerCase()];
 
-    return {
-      ticker: m.ticker,
-      word,
-      chance: yesPrice,
-      yesPrice,
-      noPrice: 100 - yesPrice,
-      priceChange: yesPrice - prevPrice,
-      volume: m.volume || 0,
-      transcriptCount,
-      trending: news?.trending || false,
-      newsCount: news?.articleCount || 0,
-    };
-  });
+        return {
+          ticker: m.ticker,
+          word,
+          chance: yesPrice,
+          yesPrice,
+          noPrice: 100 - yesPrice,
+          priceChange: yesPrice - prevPrice,
+          volume: m.volume || 0,
+          transcriptCount,
+          trending: news?.trending || false,
+          newsCount: news?.articleCount || 0,
+        };
+      })
+    : (earningsEvent?.markets || []).map((m) => {
+        // Count word in transcripts
+        const transcriptCount = transcripts.reduce((sum, t) => {
+          return sum + countOccurrences(t.content, m.word);
+        }, 0);
+
+        // Get news data
+        const news = newsData[m.word.toLowerCase()];
+
+        return {
+          ticker: m.ticker,
+          word: m.word,
+          chance: m.yesPrice,
+          yesPrice: m.yesPrice,
+          noPrice: m.noPrice,
+          priceChange: 0, // No price history in stored data
+          volume: m.volume,
+          transcriptCount,
+          trending: news?.trending || false,
+          newsCount: news?.articleCount || 0,
+        };
+      });
 
   return {
+    earningsEvent,
     markets,
     wordBets,
     loading,

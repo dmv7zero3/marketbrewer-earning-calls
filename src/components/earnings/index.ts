@@ -8,3 +8,4 @@ export { NotesTab } from './NotesTab';
 export { HistoryTab } from './HistoryTab';
 export { QuickStats } from './QuickStats';
 export { MentionRules } from './MentionRules';
+export { TranscriptVerification, VerificationBadge } from './TranscriptVerification';

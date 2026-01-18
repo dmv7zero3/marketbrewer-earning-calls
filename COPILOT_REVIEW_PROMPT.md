@@ -168,11 +168,13 @@ Please provide your feedback in this format:
 **Purpose:** Personal earnings call betting assistant that integrates with Kalshi prediction markets
 
 **Key Features:**
-- View MENTION word bets from Kalshi
+- Browse 77+ companies with active MENTION markets on Kalshi
+- View MENTION word bets with prices, volume, implied probabilities
 - Upload and analyze earnings call transcripts
-- Track word frequency across quarters
-- Detect trending words via Google News
+- Track word frequency across quarters (year-over-year tracking)
+- Detect trending words via Google News RSS
 - Track betting history and performance
+- Save research notes for each event
 
 **Tech Stack:**
 - Frontend: React 18, TypeScript, Tailwind CSS, D3.js
@@ -184,3 +186,11 @@ Please provide your feedback in this format:
 - No GSIs in DynamoDB (cost optimization)
 - Personal use first (no auth required)
 - Free news API only (Google News RSS)
+
+**Recent Updates:**
+- Added 77 earnings call events to DynamoDB
+- Implemented earnings events API endpoints
+- Updated Dashboard with search/filter and grid layout
+- Updated routing to `/earnings/:company/:eventTicker`
+- Added EarningsEvent entity to DynamoDB schema
+- Comprehensive test coverage (62 tests passing)
