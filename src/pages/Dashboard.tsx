@@ -55,31 +55,43 @@ function Dashboard() {
   // Calculate P&L from positions
   const totalPnl = positions.reduce((sum, p) => sum + p.realized_pnl, 0);
 
-  // Filter out past events (only show future verified dates)
+  // Filter to only show events where betting is still open
+  // Exclude: closed, settled status OR past closeTime (market closed)
   const now = new Date();
-  const futureEvents = events.filter((event) => {
-    if (!event.eventDate || !event.eventDateVerified) return false;
-    return new Date(event.eventDate) > now;
+  const bettableEvents = events.filter((event) => {
+    // Exclude closed or settled events
+    if (event.status === 'closed' || event.status === 'settled') {
+      return false;
+    }
+    // Exclude events where market has closed (closeTime is in the past)
+    if (event.closeTime && new Date(event.closeTime) < now) {
+      return false;
+    }
+    return true;
   });
 
   // Debug: Log filtering results
   console.log('[Dashboard] Total events:', events.length);
-  console.log('[Dashboard] Events with eventDate:', events.filter(e => e.eventDate).length);
-  console.log('[Dashboard] Events with eventDateVerified:', events.filter(e => e.eventDateVerified).length);
-  console.log('[Dashboard] Events with BOTH:', events.filter(e => e.eventDate && e.eventDateVerified).length);
-  console.log('[Dashboard] Future verified events:', futureEvents.length);
+  console.log('[Dashboard] Events by status:', {
+    active: events.filter(e => e.status === 'active').length,
+    upcoming: events.filter(e => e.status === 'upcoming').length,
+    closed: events.filter(e => e.status === 'closed').length,
+    settled: events.filter(e => e.status === 'settled').length,
+  });
+  console.log('[Dashboard] Events with past closeTime:', events.filter(e => e.closeTime && new Date(e.closeTime) < now).length);
+  console.log('[Dashboard] Bettable events (market still open):', bettableEvents.length);
 
   // Filter events by search query
-  const filteredEvents = futureEvents.filter(
+  const filteredEvents = bettableEvents.filter(
     (event) =>
       event.company.toLowerCase().includes(searchQuery.toLowerCase()) ||
       event.title.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
-  // Sort events by nearest date first
+  // Sort events by nearest market close time first
   const sortedEvents = [...filteredEvents].sort((a, b) => {
-    const dateA = a.eventDate ? new Date(a.eventDate).getTime() : Infinity;
-    const dateB = b.eventDate ? new Date(b.eventDate).getTime() : Infinity;
+    const dateA = a.closeTime ? new Date(a.closeTime).getTime() : Infinity;
+    const dateB = b.closeTime ? new Date(b.closeTime).getTime() : Infinity;
     return dateA - dateB;
   });
 
@@ -139,11 +151,11 @@ function Dashboard() {
           )}
         </div>
         <div className="card">
-          <p className="text-slate-400 text-sm mb-1">Upcoming Events</p>
+          <p className="text-slate-400 text-sm mb-1">Open Markets</p>
           {loading ? (
             <div className="h-8 w-16 bg-slate-800 rounded animate-pulse" />
           ) : (
-            <p className="text-2xl font-bold text-white">{futureEvents.length}</p>
+            <p className="text-2xl font-bold text-white">{bettableEvents.length}</p>
           )}
         </div>
       </div>
@@ -161,7 +173,7 @@ function Dashboard() {
               className="px-3 py-2 bg-slate-800 border border-slate-700 rounded-lg text-white placeholder-slate-500 text-sm focus:outline-none focus:border-slate-600"
             />
             <span className="text-sm text-slate-500 whitespace-nowrap">
-              {filteredEvents.length} of {futureEvents.length} upcoming
+              {filteredEvents.length} of {bettableEvents.length} open
             </span>
           </div>
         </div>
@@ -213,9 +225,10 @@ function Dashboard() {
                   </span>
                 </div>
                 <p className="text-sm text-slate-500 mb-2 line-clamp-2">{event.title}</p>
-                {event.eventDate && event.eventDateVerified && (
+                {event.closeTime && (
                   <p className="text-xs text-blue-400 mb-3">
-                    {new Date(event.eventDate).toLocaleDateString('en-US', {
+                    Market closes:{' '}
+                    {new Date(event.closeTime).toLocaleDateString('en-US', {
                       weekday: 'short',
                       month: 'short',
                       day: 'numeric',
