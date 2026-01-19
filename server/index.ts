@@ -564,21 +564,6 @@ app.get('/api/earnings', async (req, res) => {
   try {
     const status = req.query.status as string | undefined;
     const events = await getAllEarningsEvents(status as any);
-
-    // Debug: Log what we're returning
-    console.log('[API /api/earnings] Total events:', events.length);
-    console.log('[API /api/earnings] Events with eventDate:', events.filter(e => e.eventDate).length);
-    console.log('[API /api/earnings] Events with eventDateVerified:', events.filter(e => e.eventDateVerified).length);
-    if (events.length > 0) {
-      console.log('[API /api/earnings] Sample event:', {
-        company: events[0].company,
-        eventTicker: events[0].eventTicker,
-        eventDate: events[0].eventDate,
-        eventDateVerified: events[0].eventDateVerified,
-        status: events[0].status,
-      });
-    }
-
     res.json(events);
   } catch (error) {
     console.error('Error getting earnings events:', error);

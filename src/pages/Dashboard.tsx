@@ -29,16 +29,6 @@ function Dashboard() {
           getAllEarningsEvents().catch(() => []),
         ]);
 
-        // Debug: Log raw events data
-        console.log('[Dashboard] Raw events from API:', eventsData?.length, 'events');
-        console.log('[Dashboard] Sample events:', eventsData?.slice(0, 3).map((e: any) => ({
-          company: e.company,
-          eventTicker: e.eventTicker,
-          eventDate: e.eventDate,
-          eventDateVerified: e.eventDateVerified,
-          status: e.status,
-        })));
-
         setBalance(balanceData);
         setPositions(positionsData);
         setEvents(eventsData);
@@ -58,28 +48,29 @@ function Dashboard() {
   // Filter to only show events where betting is still open
   // Exclude: closed, settled status OR past closeTime (market closed)
   const now = new Date();
+
+  // Helper: Check if an event has any open markets for betting
+  // Kalshi market statuses: initialized, inactive, active, closed, determined, disputed, amended, finalized
+  // Only 'active' status means betting is still open
+  // Note: Our DB also has 'open' from legacy data which we treat as active
+  const hasOpenMarkets = (event: EarningsEvent): boolean => {
+    if (!event.markets || event.markets.length === 0) return false;
+    // Check if at least one market is still active (open for betting)
+    // Accept both 'active' (Kalshi) and 'open' (our legacy default)
+    return event.markets.some(m => m.status === 'active' || m.status === 'open');
+  };
+
   const bettableEvents = events.filter((event) => {
     // Exclude closed or settled events
     if (event.status === 'closed' || event.status === 'settled') {
       return false;
     }
-    // Exclude events where market has closed (closeTime is in the past)
-    if (event.closeTime && new Date(event.closeTime) < now) {
+    // Exclude events where no markets are open for betting
+    if (!hasOpenMarkets(event)) {
       return false;
     }
     return true;
   });
-
-  // Debug: Log filtering results
-  console.log('[Dashboard] Total events:', events.length);
-  console.log('[Dashboard] Events by status:', {
-    active: events.filter(e => e.status === 'active').length,
-    upcoming: events.filter(e => e.status === 'upcoming').length,
-    closed: events.filter(e => e.status === 'closed').length,
-    settled: events.filter(e => e.status === 'settled').length,
-  });
-  console.log('[Dashboard] Events with past closeTime:', events.filter(e => e.closeTime && new Date(e.closeTime) < now).length);
-  console.log('[Dashboard] Bettable events (market still open):', bettableEvents.length);
 
   // Filter events by search query
   const filteredEvents = bettableEvents.filter(
