@@ -12,6 +12,7 @@ import {
   getTranscriptsForEvent,
   getAllTranscripts,
   updateTranscriptVerification,
+  updateEarningsEventDate,
   getPendingTranscripts,
   saveNote,
   getNotesForEvent,
@@ -43,11 +44,7 @@ app.use(express.json());
 /**
  * Generate RSA-PSS signature for Kalshi API authentication
  */
-function signRequest(
-  method: string,
-  path: string,
-  timestamp: string
-): string | null {
+function signRequest(method: string, path: string, timestamp: string): string | null {
   try {
     const privateKeyPath = KALSHI_PRIVATE_KEY_PATH.replace('~', process.env.HOME || '');
 
@@ -141,7 +138,9 @@ app.get('/api/kalshi/portfolio/balance', async (req, res) => {
 // Portfolio positions
 app.get('/api/kalshi/portfolio/positions', async (req, res) => {
   const queryString = new URLSearchParams(req.query as Record<string, string>).toString();
-  const endpoint = queryString ? `/portfolio/positions?${queryString}` : '/portfolio/positions';
+  const endpoint = queryString
+    ? `/portfolio/positions?${queryString}`
+    : '/portfolio/positions';
   const result = await kalshiRequest('GET', endpoint);
   res.status(result.status).json(result.data);
 });
@@ -337,6 +336,23 @@ app.patch('/api/transcripts/:eventTicker/:date/verify', async (req, res) => {
       notes
     );
 
+    if (status === 'verified') {
+      const transcript = await getTranscript(
+        decodeURIComponent(eventTicker),
+        decodeURIComponent(date)
+      );
+
+      if (transcript?.company && (transcript.parsedEarningsDate || transcript.date)) {
+        const eventDate = transcript.parsedEarningsDate || transcript.date;
+        await updateEarningsEventDate(transcript.company, transcript.eventTicker, {
+          eventDate,
+          source: 'manual',
+          verified: true,
+          confidence: transcript.validationConfidence,
+        });
+      }
+    }
+
     res.json({ success: true, status });
   } catch (error) {
     console.error('Error verifying transcript:', error);
@@ -400,9 +416,29 @@ app.delete('/api/notes/:eventTicker/:timestamp', async (req, res) => {
 // Save a bet record
 app.post('/api/bets', async (req, res) => {
   try {
-    const { betId, eventTicker, marketTicker, company, word, side, action, count, price } = req.body;
+    const {
+      betId,
+      eventTicker,
+      marketTicker,
+      company,
+      word,
+      side,
+      action,
+      count,
+      price,
+    } = req.body;
 
-    if (!betId || !eventTicker || !marketTicker || !company || !word || !side || !action || !count || !price) {
+    if (
+      !betId ||
+      !eventTicker ||
+      !marketTicker ||
+      !company ||
+      !word ||
+      !side ||
+      !action ||
+      !count ||
+      !price
+    ) {
       return res.status(400).json({ error: 'Missing required fields' });
     }
 
@@ -528,6 +564,21 @@ app.get('/api/earnings', async (req, res) => {
   try {
     const status = req.query.status as string | undefined;
     const events = await getAllEarningsEvents(status as any);
+
+    // Debug: Log what we're returning
+    console.log('[API /api/earnings] Total events:', events.length);
+    console.log('[API /api/earnings] Events with eventDate:', events.filter(e => e.eventDate).length);
+    console.log('[API /api/earnings] Events with eventDateVerified:', events.filter(e => e.eventDateVerified).length);
+    if (events.length > 0) {
+      console.log('[API /api/earnings] Sample event:', {
+        company: events[0].company,
+        eventTicker: events[0].eventTicker,
+        eventDate: events[0].eventDate,
+        eventDateVerified: events[0].eventDateVerified,
+        status: events[0].status,
+      });
+    }
+
     res.json(events);
   } catch (error) {
     console.error('Error getting earnings events:', error);
@@ -563,13 +614,25 @@ app.get('/api/earnings/:company/:eventTicker', async (req, res) => {
 // Create or update an earnings event
 app.post('/api/earnings', async (req, res) => {
   try {
-    const { eventTicker, company, title, category, status, eventDate, closeTime, markets } = req.body;
+    const {
+      eventTicker,
+      company,
+      title,
+      category,
+      status,
+      eventDate,
+      closeTime,
+      markets,
+    } = req.body;
 
     if (!eventTicker || !company || !title) {
-      return res.status(400).json({ error: 'Missing required fields: eventTicker, company, title' });
+      return res
+        .status(400)
+        .json({ error: 'Missing required fields: eventTicker, company, title' });
     }
 
-    const totalVolume = markets?.reduce((sum: number, m: any) => sum + (m.volume || 0), 0) || 0;
+    const totalVolume =
+      markets?.reduce((sum: number, m: any) => sum + (m.volume || 0), 0) || 0;
 
     const event = await saveEarningsEvent({
       eventTicker,
@@ -629,7 +692,11 @@ app.delete('/api/earnings/:company/:eventTicker', async (req, res) => {
 
 app.listen(PORT, () => {
   console.log(`Server running on http://localhost:${PORT}`);
-  console.log(`Kalshi API Key ID: ${KALSHI_API_KEY_ID ? 'Configured' : 'Not configured'}`);
+  console.log(
+    `Kalshi API Key ID: ${KALSHI_API_KEY_ID ? 'Configured' : 'Not configured'}`
+  );
   console.log(`Private Key Path: ${KALSHI_PRIVATE_KEY_PATH || 'Not configured'}`);
-  console.log(`DynamoDB Table: ${process.env.DYNAMODB_TABLE_NAME || 'marketbrewer-earnings-call'}`);
+  console.log(
+    `DynamoDB Table: ${process.env.DYNAMODB_TABLE_NAME || 'marketbrewer-earnings-call'}`
+  );
 });

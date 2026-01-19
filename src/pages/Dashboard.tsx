@@ -6,10 +6,7 @@ import {
   type KalshiBalance,
   type KalshiPosition,
 } from '@/lib/api/kalshi';
-import {
-  getAllEarningsEvents,
-  type EarningsEvent,
-} from '@/lib/api/data';
+import { getAllEarningsEvents, type EarningsEvent } from '@/lib/api/data';
 
 function Dashboard() {
   const [balance, setBalance] = useState<KalshiBalance | null>(null);
@@ -32,6 +29,16 @@ function Dashboard() {
           getAllEarningsEvents().catch(() => []),
         ]);
 
+        // Debug: Log raw events data
+        console.log('[Dashboard] Raw events from API:', eventsData?.length, 'events');
+        console.log('[Dashboard] Sample events:', eventsData?.slice(0, 3).map((e: any) => ({
+          company: e.company,
+          eventTicker: e.eventTicker,
+          eventDate: e.eventDate,
+          eventDateVerified: e.eventDateVerified,
+          status: e.status,
+        })));
+
         setBalance(balanceData);
         setPositions(positionsData);
         setEvents(eventsData);
@@ -48,20 +55,28 @@ function Dashboard() {
   // Calculate P&L from positions
   const totalPnl = positions.reduce((sum, p) => sum + p.realized_pnl, 0);
 
-  // Filter out past events (only show future dates)
+  // Filter out past events (only show future verified dates)
   const now = new Date();
   const futureEvents = events.filter((event) => {
-    if (!event.eventDate) return true; // Keep events without dates
+    if (!event.eventDate || !event.eventDateVerified) return false;
     return new Date(event.eventDate) > now;
   });
 
+  // Debug: Log filtering results
+  console.log('[Dashboard] Total events:', events.length);
+  console.log('[Dashboard] Events with eventDate:', events.filter(e => e.eventDate).length);
+  console.log('[Dashboard] Events with eventDateVerified:', events.filter(e => e.eventDateVerified).length);
+  console.log('[Dashboard] Events with BOTH:', events.filter(e => e.eventDate && e.eventDateVerified).length);
+  console.log('[Dashboard] Future verified events:', futureEvents.length);
+
   // Filter events by search query
-  const filteredEvents = futureEvents.filter((event) =>
-    event.company.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    event.title.toLowerCase().includes(searchQuery.toLowerCase())
+  const filteredEvents = futureEvents.filter(
+    (event) =>
+      event.company.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      event.title.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
-  // Sort events by nearest date first (events without dates go last)
+  // Sort events by nearest date first
   const sortedEvents = [...filteredEvents].sort((a, b) => {
     const dateA = a.eventDate ? new Date(a.eventDate).getTime() : Infinity;
     const dateB = b.eventDate ? new Date(b.eventDate).getTime() : Infinity;
@@ -83,7 +98,8 @@ function Dashboard() {
         <div className="mb-6 p-4 bg-loss-500/10 border border-loss-500/30 rounded-lg">
           <p className="text-loss-400 text-sm">{error}</p>
           <p className="text-slate-500 text-xs mt-1">
-            Make sure the proxy server is running: <code className="bg-slate-800 px-1 rounded">bun run server</code>
+            Make sure the proxy server is running:{' '}
+            <code className="bg-slate-800 px-1 rounded">bun run server</code>
           </p>
         </div>
       )}
@@ -135,9 +151,7 @@ function Dashboard() {
       {/* Earnings Events List */}
       <section>
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-4">
-          <h2 className="text-xl font-semibold text-white">
-            Earnings Call Events
-          </h2>
+          <h2 className="text-xl font-semibold text-white">Earnings Call Events</h2>
           <div className="flex items-center gap-4">
             <input
               type="text"
@@ -171,7 +185,9 @@ function Dashboard() {
               {searchQuery ? 'No matching events found' : 'No earnings call events found'}
             </p>
             <p className="text-slate-500 text-sm">
-              {searchQuery ? 'Try a different search term' : 'Events will appear here when available'}
+              {searchQuery
+                ? 'Try a different search term'
+                : 'Events will appear here when available'}
             </p>
           </div>
         ) : (
@@ -183,25 +199,21 @@ function Dashboard() {
                 className="card block hover:border-slate-600 transition-colors"
               >
                 <div className="flex items-start justify-between mb-2">
-                  <span className="text-lg font-bold text-white">
-                    {event.company}
-                  </span>
+                  <span className="text-lg font-bold text-white">{event.company}</span>
                   <span
                     className={`px-2 py-0.5 text-xs rounded ${
                       event.status === 'active'
                         ? 'bg-profit-500/20 text-profit-400'
                         : event.status === 'upcoming'
-                        ? 'bg-blue-500/20 text-blue-400'
-                        : 'bg-slate-700 text-slate-400'
+                          ? 'bg-blue-500/20 text-blue-400'
+                          : 'bg-slate-700 text-slate-400'
                     }`}
                   >
                     {event.status}
                   </span>
                 </div>
-                <p className="text-sm text-slate-500 mb-2 line-clamp-2">
-                  {event.title}
-                </p>
-                {event.eventDate && (
+                <p className="text-sm text-slate-500 mb-2 line-clamp-2">{event.title}</p>
+                {event.eventDate && event.eventDateVerified && (
                   <p className="text-xs text-blue-400 mb-3">
                     {new Date(event.eventDate).toLocaleDateString('en-US', {
                       weekday: 'short',
@@ -237,10 +249,7 @@ function Dashboard() {
           <div className="card">
             <div className="divide-y divide-slate-800">
               {positions.map((pos) => (
-                <div
-                  key={pos.ticker}
-                  className="py-3 flex items-center justify-between"
-                >
+                <div key={pos.ticker} className="py-3 flex items-center justify-between">
                   <div>
                     <p className="text-white font-medium">{pos.ticker}</p>
                     <p className="text-sm text-slate-500">
@@ -253,8 +262,8 @@ function Dashboard() {
                         pos.realized_pnl >= 0 ? 'text-profit-500' : 'text-loss-500'
                       }`}
                     >
-                      {pos.realized_pnl >= 0 ? '+' : ''}
-                      ${(pos.realized_pnl / 100).toFixed(2)}
+                      {pos.realized_pnl >= 0 ? '+' : ''}$
+                      {(pos.realized_pnl / 100).toFixed(2)}
                     </p>
                     <p className="text-xs text-slate-500">
                       Exposure: ${(pos.market_exposure / 100).toFixed(2)}
