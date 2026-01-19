@@ -3,7 +3,7 @@
  * Sync Earnings Event Dates from Kalshi API
  *
  * This script fetches live market data from Kalshi and updates
- * event dates in DynamoDB with accurate close_time values.
+ * close_time and markets in DynamoDB without overwriting earnings event dates.
  *
  * Usage: bun run scripts/sync-kalshi-dates.ts
  */
@@ -14,6 +14,7 @@ import fs from 'fs';
 import {
   getAllEarningsEvents,
   saveEarningsEvent,
+  updateEarningsEventDate,
   type EarningsEvent,
 } from '../server/lib/dynamodb';
 
@@ -24,85 +25,85 @@ const KALSHI_PRIVATE_KEY_PATH = process.env.KALSHI_PRIVATE_KEY_PATH || '';
 
 // Company name to stock ticker mapping
 const COMPANY_TICKERS: Record<string, string> = {
-  'Netflix': 'NFLX',
-  'Intel': 'INTC',
-  'Tesla': 'TSLA',
-  'Microsoft': 'MSFT',
-  'Meta': 'META',
-  'Apple': 'AAPL',
-  'Amazon': 'AMZN',
-  'Google': 'GOOGL',
-  'Alphabet': 'GOOGL',
-  'NVIDIA': 'NVDA',
-  'Palantir': 'PLTR',
-  'PayPal': 'PYPL',
-  'Disney': 'DIS',
-  'Uber': 'UBER',
-  'Coinbase': 'COIN',
-  'Robinhood': 'HOOD',
-  'Airbnb': 'ABNB',
-  'DraftKings': 'DKNG',
-  'Roku': 'ROKU',
-  'Reddit': 'RDDT',
-  'Snap': 'SNAP',
-  'GameStop': 'GME',
-  'AMC': 'AMC',
-  'Costco': 'COST',
-  'Target': 'TGT',
-  'Walmart': 'WMT',
+  Netflix: 'NFLX',
+  Intel: 'INTC',
+  Tesla: 'TSLA',
+  Microsoft: 'MSFT',
+  Meta: 'META',
+  Apple: 'AAPL',
+  Amazon: 'AMZN',
+  Google: 'GOOGL',
+  Alphabet: 'GOOGL',
+  NVIDIA: 'NVDA',
+  Palantir: 'PLTR',
+  PayPal: 'PYPL',
+  Disney: 'DIS',
+  Uber: 'UBER',
+  Coinbase: 'COIN',
+  Robinhood: 'HOOD',
+  Airbnb: 'ABNB',
+  DraftKings: 'DKNG',
+  Roku: 'ROKU',
+  Reddit: 'RDDT',
+  Snap: 'SNAP',
+  GameStop: 'GME',
+  AMC: 'AMC',
+  Costco: 'COST',
+  Target: 'TGT',
+  Walmart: 'WMT',
   'Home Depot': 'HD',
-  'Starbucks': 'SBUX',
-  'McDonald\'s': 'MCD',
-  'Chipotle': 'CMG',
-  'Nike': 'NKE',
-  'Adobe': 'ADBE',
-  'Salesforce': 'CRM',
-  'Oracle': 'ORCL',
-  'Dell': 'DELL',
-  'Broadcom': 'AVGO',
-  'CrowdStrike': 'CRWD',
-  'Lucid': 'LCID',
-  'NIO': 'NIO',
-  'Ford': 'F',
-  'GM': 'GM',
-  'Delta': 'DAL',
+  Starbucks: 'SBUX',
+  "McDonald's": 'MCD',
+  Chipotle: 'CMG',
+  Nike: 'NKE',
+  Adobe: 'ADBE',
+  Salesforce: 'CRM',
+  Oracle: 'ORCL',
+  Dell: 'DELL',
+  Broadcom: 'AVGO',
+  CrowdStrike: 'CRWD',
+  Lucid: 'LCID',
+  NIO: 'NIO',
+  Ford: 'F',
+  GM: 'GM',
+  Delta: 'DAL',
   'United Airlines': 'UAL',
   'American Airlines': 'AAL',
-  'JPMorgan': 'JPM',
+  JPMorgan: 'JPM',
   'Bank of America': 'BAC',
   'Wells Fargo': 'WFC',
   'Goldman Sachs': 'GS',
-  'BlackRock': 'BLK',
+  BlackRock: 'BLK',
   'American Express': 'AXP',
   'Coca-Cola': 'KO',
-  'PepsiCo': 'PEP',
+  PepsiCo: 'PEP',
   'Procter & Gamble': 'PG',
   'Johnson & Johnson': 'JNJ',
-  'TSMC': 'TSM',
-  'Micron': 'MU',
-  'EA': 'EA',
-  'Alibaba': 'BABA',
-  'CAVA': 'CAVA',
-  'MicroStrategy': 'MSTR',
+  TSMC: 'TSM',
+  Micron: 'MU',
+  EA: 'EA',
+  Alibaba: 'BABA',
+  CAVA: 'CAVA',
+  MicroStrategy: 'MSTR',
   'Dollar General': 'DG',
   'GE Vernova': 'GEV',
   'John Deere': 'DE',
   'Berkshire Hathaway': 'BRK.B',
-  'FedEx': 'FDX',
-  'Lyft': 'LYFT',
-  'Albertsons': 'ACI',
-  'Hims': 'HIMS',
-  'Celsius': 'CELH',
-  'CoreWeave': 'CRWV',
-  'Ulta': 'ULTA',
-  'Kroger': 'KR',
+  FedEx: 'FDX',
+  Lyft: 'LYFT',
+  Albertsons: 'ACI',
+  Hims: 'HIMS',
+  Celsius: 'CELH',
+  CoreWeave: 'CRWV',
+  Ulta: 'ULTA',
+  Kroger: 'KR',
   'Cracker Barrel': 'CBRL',
-  'RBC': 'RY',
+  RBC: 'RY',
   'Hewlett Packard': 'HPE',
-  'Circle': 'CRCL',
+  Circle: 'CRCL',
   'Constellation Brands': 'STZ',
-  'Nebius': 'NBIS',
-  'Chewy': 'CHWY',
+  Nebius: 'NBIS',
+  Chewy: 'CHWY',
 };
 
 interface KalshiMarket {
@@ -209,7 +210,9 @@ async function fetchKalshiEarningsMarkets(): Promise<KalshiMarket[]> {
       ? `/markets?limit=200&cursor=${cursor}`
       : '/markets?limit=200';
 
-    const response = await kalshiRequest<{ markets: KalshiMarket[]; cursor?: string }>(endpoint);
+    const response = await kalshiRequest<{ markets: KalshiMarket[]; cursor?: string }>(
+      endpoint
+    );
 
     if (!response) {
       console.error('Failed to fetch markets from Kalshi');
@@ -231,7 +234,9 @@ async function fetchKalshiEarningsMarkets(): Promise<KalshiMarket[]> {
     allMarkets.push(...earningsMarkets);
     cursor = response.cursor;
 
-    console.log(`  Fetched ${response.markets.length} markets, ${earningsMarkets.length} earnings-related`);
+    console.log(
+      `  Fetched ${response.markets.length} markets, ${earningsMarkets.length} earnings-related`
+    );
   } while (cursor);
 
   console.log(`\nTotal earnings markets found: ${allMarkets.length}\n`);
@@ -241,18 +246,24 @@ async function fetchKalshiEarningsMarkets(): Promise<KalshiMarket[]> {
 /**
  * Group markets by event ticker and extract dates
  */
-function groupMarketsByEvent(markets: KalshiMarket[]): Map<string, {
-  eventTicker: string;
-  company: string;
-  closeTime: string;
-  markets: KalshiMarket[];
-}> {
-  const eventMap = new Map<string, {
+function groupMarketsByEvent(markets: KalshiMarket[]): Map<
+  string,
+  {
     eventTicker: string;
     company: string;
     closeTime: string;
     markets: KalshiMarket[];
-  }>();
+  }
+> {
+  const eventMap = new Map<
+    string,
+    {
+      eventTicker: string;
+      company: string;
+      closeTime: string;
+      markets: KalshiMarket[];
+    }
+  >();
 
   for (const market of markets) {
     const existing = eventMap.get(market.event_ticker);
@@ -284,15 +295,28 @@ function groupMarketsByEvent(markets: KalshiMarket[]): Map<string, {
  * Match Kalshi event to DynamoDB event by company name
  */
 function matchEvents(
-  kalshiEvents: Map<string, { eventTicker: string; company: string; closeTime: string; markets: KalshiMarket[] }>,
+  kalshiEvents: Map<
+    string,
+    { eventTicker: string; company: string; closeTime: string; markets: KalshiMarket[] }
+  >,
   dbEvents: EarningsEvent[]
 ): Array<{
   dbEvent: EarningsEvent;
-  kalshiEvent: { eventTicker: string; company: string; closeTime: string; markets: KalshiMarket[] };
+  kalshiEvent: {
+    eventTicker: string;
+    company: string;
+    closeTime: string;
+    markets: KalshiMarket[];
+  };
 }> {
   const matches: Array<{
     dbEvent: EarningsEvent;
-    kalshiEvent: { eventTicker: string; company: string; closeTime: string; markets: KalshiMarket[] };
+    kalshiEvent: {
+      eventTicker: string;
+      company: string;
+      closeTime: string;
+      markets: KalshiMarket[];
+    };
   }> = [];
 
   for (const dbEvent of dbEvents) {
@@ -368,21 +392,25 @@ async function syncKalshiDates() {
   let unchanged = 0;
 
   for (const { dbEvent, kalshiEvent } of matches) {
-    const kalshiDate = new Date(kalshiEvent.closeTime);
-    const dbDate = dbEvent.eventDate ? new Date(dbEvent.eventDate) : null;
+    const kalshiCloseTime = new Date(kalshiEvent.closeTime);
+    const dbCloseTime = dbEvent.closeTime ? new Date(dbEvent.closeTime) : null;
 
-    // Check if dates are different
-    if (!dbDate || kalshiDate.getTime() !== dbDate.getTime()) {
+    // Update closeTime/markets AND set eventDate from Kalshi close_time
+    const needsUpdate = !dbCloseTime || kalshiCloseTime.getTime() !== dbCloseTime.getTime();
+    const needsEventDate = !dbEvent.eventDate || !dbEvent.eventDateVerified;
+
+    if (needsUpdate || needsEventDate) {
       console.log(`✓ Updating ${dbEvent.company}:`);
-      console.log(`    Old: ${dbEvent.eventDate || 'none'}`);
-      console.log(`    New: ${kalshiEvent.closeTime} (from Kalshi)`);
+      console.log(`    Close (old): ${dbEvent.closeTime || 'none'}`);
+      console.log(`    Close (new): ${kalshiEvent.closeTime} (from Kalshi)`);
+      console.log(`    EventDate: ${kalshiEvent.closeTime} (verified from Kalshi)`);
 
       // Update markets with Kalshi data
-      const updatedMarkets = kalshiEvent.markets.map((m, i) => ({
+      const updatedMarkets = kalshiEvent.markets.map((m) => ({
         ticker: m.ticker,
         word: m.yes_sub_title || m.subtitle || m.ticker.split('-').pop() || '',
         yesPrice: Math.round((m.yes_bid || m.last_price || 0) * 100),
-        noPrice: Math.round((m.no_bid || (1 - (m.last_price || 0))) * 100),
+        noPrice: Math.round((m.no_bid || 1 - (m.last_price || 0)) * 100),
         lastPrice: Math.round((m.last_price || 0) * 100),
         volume: m.volume || 0,
         status: m.status || 'open',
@@ -390,6 +418,7 @@ async function syncKalshiDates() {
 
       const totalVolume = updatedMarkets.reduce((sum, m) => sum + m.volume, 0);
 
+      // Save the event with updated markets and closeTime
       await saveEarningsEvent({
         eventTicker: dbEvent.eventTicker,
         seriesTicker: dbEvent.seriesTicker,
@@ -397,13 +426,18 @@ async function syncKalshiDates() {
         stockTicker: dbEvent.stockTicker || COMPANY_TICKERS[dbEvent.company],
         title: dbEvent.title,
         category: dbEvent.category,
-        status: kalshiDate > new Date() ? 'active' : 'closed',
-        eventDate: kalshiEvent.closeTime,
+        status: dbEvent.status,
+        eventDate: kalshiEvent.closeTime, // Use Kalshi close_time as event date
+        eventDateSource: 'kalshi' as any,
+        eventDateVerified: true, // Mark as verified since it comes from Kalshi
+        eventDateConfidence: 100,
+        eventDateUpdatedAt: new Date().toISOString(),
         closeTime: kalshiEvent.closeTime,
         seekingAlphaUrl: dbEvent.seekingAlphaUrl,
         markets: updatedMarkets.length > 0 ? updatedMarkets : dbEvent.markets,
         totalVolume: updatedMarkets.length > 0 ? totalVolume : dbEvent.totalVolume,
-        marketCount: updatedMarkets.length > 0 ? updatedMarkets.length : dbEvent.marketCount,
+        marketCount:
+          updatedMarkets.length > 0 ? updatedMarkets.length : dbEvent.marketCount,
       });
 
       updated++;

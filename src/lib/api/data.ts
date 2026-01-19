@@ -89,6 +89,10 @@ export interface EarningsEvent {
   category: string;
   status: 'upcoming' | 'active' | 'closed' | 'settled';
   eventDate?: string;
+  eventDateSource?: 'transcript' | 'manual' | 'kalshi';
+  eventDateVerified?: boolean;
+  eventDateConfidence?: number;
+  eventDateUpdatedAt?: string;
   closeTime?: string;
   seekingAlphaUrl?: string;
   markets: Array<{
@@ -147,15 +151,22 @@ export async function saveTranscript(data: {
   });
 }
 
-export async function getTranscript(eventTicker: string, date: string): Promise<Transcript | null> {
+export async function getTranscript(
+  eventTicker: string,
+  date: string
+): Promise<Transcript | null> {
   try {
-    return await fetchApi(`/transcripts/${encodeURIComponent(eventTicker)}/${encodeURIComponent(date)}`);
+    return await fetchApi(
+      `/transcripts/${encodeURIComponent(eventTicker)}/${encodeURIComponent(date)}`
+    );
   } catch {
     return null;
   }
 }
 
-export async function getTranscriptsForCompany(eventTicker: string): Promise<Transcript[]> {
+export async function getTranscriptsForCompany(
+  eventTicker: string
+): Promise<Transcript[]> {
   return fetchApi(`/transcripts/${encodeURIComponent(eventTicker)}`);
 }
 
@@ -173,10 +184,13 @@ export async function verifyTranscript(
   status: 'verified' | 'rejected',
   notes?: string
 ): Promise<void> {
-  await fetchApi(`/transcripts/${encodeURIComponent(eventTicker)}/${encodeURIComponent(date)}/verify`, {
-    method: 'PATCH',
-    body: JSON.stringify({ status, notes }),
-  });
+  await fetchApi(
+    `/transcripts/${encodeURIComponent(eventTicker)}/${encodeURIComponent(date)}/verify`,
+    {
+      method: 'PATCH',
+      body: JSON.stringify({ status, notes }),
+    }
+  );
 }
 
 // ===========================================
@@ -200,9 +214,12 @@ export async function getNotesForEvent(eventTicker: string): Promise<ResearchNot
 }
 
 export async function deleteNote(eventTicker: string, timestamp: string): Promise<void> {
-  await fetchApi(`/notes/${encodeURIComponent(eventTicker)}/${encodeURIComponent(timestamp)}`, {
-    method: 'DELETE',
-  });
+  await fetchApi(
+    `/notes/${encodeURIComponent(eventTicker)}/${encodeURIComponent(timestamp)}`,
+    {
+      method: 'DELETE',
+    }
+  );
 }
 
 // ===========================================
@@ -234,7 +251,11 @@ export async function getBet(betId: string): Promise<BetRecord | null> {
   }
 }
 
-export async function updateBetStatus(betId: string, status: string, orderId?: string): Promise<void> {
+export async function updateBetStatus(
+  betId: string,
+  status: string,
+  orderId?: string
+): Promise<void> {
   await fetchApi(`/bets/${encodeURIComponent(betId)}`, {
     method: 'PATCH',
     body: JSON.stringify({ status, orderId }),
@@ -250,19 +271,28 @@ export async function getAllBets(status?: string): Promise<BetRecord[]> {
 // News Functions (Google News RSS)
 // ===========================================
 
-export async function getNewsForWord(word: string, company?: string): Promise<NewsResult> {
+export async function getNewsForWord(
+  word: string,
+  company?: string
+): Promise<NewsResult> {
   const query = company ? `?company=${encodeURIComponent(company)}` : '';
   return fetchApi(`/news/${encodeURIComponent(word)}${query}`);
 }
 
-export async function getNewsForWords(words: string[], company?: string): Promise<Record<string, NewsResult>> {
+export async function getNewsForWords(
+  words: string[],
+  company?: string
+): Promise<Record<string, NewsResult>> {
   return fetchApi('/news/batch', {
     method: 'POST',
     body: JSON.stringify({ words, company }),
   });
 }
 
-export async function getTrendingWords(words: string[], company?: string): Promise<string[]> {
+export async function getTrendingWords(
+  words: string[],
+  company?: string
+): Promise<string[]> {
   const result = await fetchApi<{ trending: string[] }>('/news/trending', {
     method: 'POST',
     body: JSON.stringify({ words, company }),
@@ -279,13 +309,20 @@ export async function getAllEarningsEvents(status?: string): Promise<EarningsEve
   return fetchApi(`/earnings${query}`);
 }
 
-export async function getEarningsEventsForCompany(company: string): Promise<EarningsEvent[]> {
+export async function getEarningsEventsForCompany(
+  company: string
+): Promise<EarningsEvent[]> {
   return fetchApi(`/earnings/company/${encodeURIComponent(company)}`);
 }
 
-export async function getEarningsEvent(company: string, eventTicker: string): Promise<EarningsEvent | null> {
+export async function getEarningsEvent(
+  company: string,
+  eventTicker: string
+): Promise<EarningsEvent | null> {
   try {
-    return await fetchApi(`/earnings/${encodeURIComponent(company)}/${encodeURIComponent(eventTicker)}`);
+    return await fetchApi(
+      `/earnings/${encodeURIComponent(company)}/${encodeURIComponent(eventTicker)}`
+    );
   } catch {
     return null;
   }
@@ -312,10 +349,13 @@ export async function updateEarningsMarkets(
   eventTicker: string,
   markets: EarningsEvent['markets']
 ): Promise<void> {
-  await fetchApi(`/earnings/${encodeURIComponent(company)}/${encodeURIComponent(eventTicker)}/markets`, {
-    method: 'PATCH',
-    body: JSON.stringify({ markets }),
-  });
+  await fetchApi(
+    `/earnings/${encodeURIComponent(company)}/${encodeURIComponent(eventTicker)}/markets`,
+    {
+      method: 'PATCH',
+      body: JSON.stringify({ markets }),
+    }
+  );
 }
 
 // ===========================================
@@ -333,7 +373,9 @@ export interface QuarterlyAnalysis {
   totalPnl: number;
 }
 
-export async function getHistoricalAnalysis(eventTicker: string): Promise<QuarterlyAnalysis[]> {
+export async function getHistoricalAnalysis(
+  eventTicker: string
+): Promise<QuarterlyAnalysis[]> {
   const [transcripts, bets] = await Promise.all([
     getTranscriptsForCompany(eventTicker),
     getAllBets(),

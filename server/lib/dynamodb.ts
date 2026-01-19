@@ -40,12 +40,23 @@ export interface Transcript {
   sourceTitle?: string; // Title from source page
   sourceDate?: string; // Date string from source page
   sourceTicker?: string; // Ticker symbol from source
+  sourceDomain?: string; // Domain of source URL
+
+  // Content fingerprints
+  contentHash?: string; // SHA-256 of transcript content
+  rawHtmlHash?: string; // SHA-256 of raw HTML (if available)
 
   // Verification fields
   verificationStatus: 'pending' | 'verified' | 'rejected';
   verifiedAt?: string;
   verifiedBy?: string; // 'user' or 'auto'
   verificationNotes?: string;
+
+  // Validation summary
+  validationDecision?: 'approve' | 'review' | 'reject';
+  validationConfidence?: number; // 0-100
+  validationReasons?: string[];
+  auditId?: string; // Audit log entry ID
 
   // Parsed/normalized data for comparison
   parsedCompany?: string; // Company name extracted from source
@@ -110,6 +121,10 @@ export interface EarningsEvent {
   category: string;
   status: 'upcoming' | 'active' | 'closed' | 'settled';
   eventDate?: string;
+  eventDateSource?: 'transcript' | 'manual' | 'kalshi';
+  eventDateVerified?: boolean;
+  eventDateConfidence?: number; // 0-100
+  eventDateUpdatedAt?: string;
   closeTime?: string;
   seekingAlphaUrl?: string; // URL to Seeking Alpha earnings transcripts page
   markets: Array<{
@@ -128,7 +143,9 @@ export interface EarningsEvent {
 }
 
 // Transcript Functions
-export async function saveTranscript(transcript: Omit<Transcript, 'PK' | 'SK' | 'createdAt'>) {
+export async function saveTranscript(
+  transcript: Omit<Transcript, 'PK' | 'SK' | 'createdAt'>
+) {
   const item: Transcript = {
     PK: `TRANSCRIPT#${transcript.eventTicker}`,
     SK: `DATE#${transcript.date}`,
@@ -146,7 +163,10 @@ export async function saveTranscript(transcript: Omit<Transcript, 'PK' | 'SK' | 
   return item;
 }
 
-export async function getTranscript(eventTicker: string, date: string): Promise<Transcript | null> {
+export async function getTranscript(
+  eventTicker: string,
+  date: string
+): Promise<Transcript | null> {
   const result = await docClient.send(
     new GetCommand({
       TableName: TABLE_NAME,
@@ -238,7 +258,9 @@ export async function getPendingTranscripts(): Promise<Transcript[]> {
 }
 
 // Research Note Functions
-export async function saveNote(note: Omit<ResearchNote, 'PK' | 'SK' | 'createdAt' | 'updatedAt'>) {
+export async function saveNote(
+  note: Omit<ResearchNote, 'PK' | 'SK' | 'createdAt' | 'updatedAt'>
+) {
   const timestamp = Date.now();
   const item: ResearchNote = {
     PK: `NOTE#${note.eventTicker}`,
@@ -452,7 +474,9 @@ export async function getEarningsEvent(
   return (result.Item as EarningsEvent) || null;
 }
 
-export async function getEarningsEventsForCompany(company: string): Promise<EarningsEvent[]> {
+export async function getEarningsEventsForCompany(
+  company: string
+): Promise<EarningsEvent[]> {
   const result = await docClient.send(
     new QueryCommand({
       TableName: TABLE_NAME,
@@ -467,7 +491,9 @@ export async function getEarningsEventsForCompany(company: string): Promise<Earn
   return (result.Items as EarningsEvent[]) || [];
 }
 
-export async function getAllEarningsEvents(status?: EarningsEvent['status']): Promise<EarningsEvent[]> {
+export async function getAllEarningsEvents(
+  status?: EarningsEvent['status']
+): Promise<EarningsEvent[]> {
   const params: any = {
     TableName: TABLE_NAME,
     FilterExpression: 'begins_with(PK, :prefix)',
@@ -499,7 +525,8 @@ export async function updateEarningsEventMarkets(
         PK: `EARNINGS#${company.toUpperCase()}`,
         SK: `EVENT#${eventTicker}`,
       },
-      UpdateExpression: 'SET markets = :markets, totalVolume = :volume, marketCount = :count, updatedAt = :updatedAt',
+      UpdateExpression:
+        'SET markets = :markets, totalVolume = :volume, marketCount = :count, updatedAt = :updatedAt',
       ExpressionAttributeValues: {
         ':markets': markets,
         ':volume': totalVolume,
@@ -510,7 +537,40 @@ export async function updateEarningsEventMarkets(
   );
 }
 
-export async function deleteEarningsEvent(company: string, eventTicker: string): Promise<void> {
+export async function updateEarningsEventDate(
+  company: string,
+  eventTicker: string,
+  params: {
+    eventDate: string;
+    source: 'transcript' | 'manual' | 'kalshi';
+    verified: boolean;
+    confidence?: number;
+  }
+): Promise<void> {
+  await docClient.send(
+    new UpdateCommand({
+      TableName: TABLE_NAME,
+      Key: {
+        PK: `EARNINGS#${company.toUpperCase()}`,
+        SK: `EVENT#${eventTicker}`,
+      },
+      UpdateExpression:
+        'SET eventDate = :eventDate, eventDateSource = :source, eventDateVerified = :verified, eventDateConfidence = :confidence, eventDateUpdatedAt = :updatedAt, updatedAt = :updatedAt',
+      ExpressionAttributeValues: {
+        ':eventDate': params.eventDate,
+        ':source': params.source,
+        ':verified': params.verified,
+        ':confidence': params.confidence ?? null,
+        ':updatedAt': new Date().toISOString(),
+      },
+    })
+  );
+}
+
+export async function deleteEarningsEvent(
+  company: string,
+  eventTicker: string
+): Promise<void> {
   await docClient.send(
     new DeleteCommand({
       TableName: TABLE_NAME,
