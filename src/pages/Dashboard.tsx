@@ -15,6 +15,7 @@ function Dashboard() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
+  const [sortBy, setSortBy] = useState<'date' | 'company' | 'volume' | 'markets'>('date');
 
   useEffect(() => {
     async function fetchData() {
@@ -79,11 +80,26 @@ function Dashboard() {
       event.title.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
-  // Sort events by nearest market close time first
+  // Sort events based on selected sort option
   const sortedEvents = [...filteredEvents].sort((a, b) => {
-    const dateA = a.closeTime ? new Date(a.closeTime).getTime() : Infinity;
-    const dateB = b.closeTime ? new Date(b.closeTime).getTime() : Infinity;
-    return dateA - dateB;
+    switch (sortBy) {
+      case 'date':
+        // Nearest close time first
+        const dateA = a.closeTime ? new Date(a.closeTime).getTime() : Infinity;
+        const dateB = b.closeTime ? new Date(b.closeTime).getTime() : Infinity;
+        return dateA - dateB;
+      case 'company':
+        // Alphabetical by company name
+        return a.company.localeCompare(b.company);
+      case 'volume':
+        // Highest volume first
+        return (b.totalVolume || 0) - (a.totalVolume || 0);
+      case 'markets':
+        // Most markets first
+        return (b.marketCount || 0) - (a.marketCount || 0);
+      default:
+        return 0;
+    }
   });
 
   return (
@@ -155,7 +171,7 @@ function Dashboard() {
       <section>
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-4">
           <h2 className="text-xl font-semibold text-white">Earnings Call Events</h2>
-          <div className="flex items-center gap-4">
+          <div className="flex items-center gap-3">
             <input
               type="text"
               placeholder="Search companies..."
@@ -163,6 +179,16 @@ function Dashboard() {
               onChange={(e) => setSearchQuery(e.target.value)}
               className="px-3 py-2 bg-slate-800 border border-slate-700 rounded-lg text-white placeholder-slate-500 text-sm focus:outline-none focus:border-slate-600"
             />
+            <select
+              value={sortBy}
+              onChange={(e) => setSortBy(e.target.value as 'date' | 'company' | 'volume' | 'markets')}
+              className="px-3 py-2 bg-slate-800 border border-slate-700 rounded-lg text-white text-sm focus:outline-none focus:border-slate-600 cursor-pointer"
+            >
+              <option value="date">Nearest Date</option>
+              <option value="company">Company A-Z</option>
+              <option value="volume">Highest Volume</option>
+              <option value="markets">Most Markets</option>
+            </select>
             <span className="text-sm text-slate-500 whitespace-nowrap">
               {filteredEvents.length} of {bettableEvents.length} open
             </span>
