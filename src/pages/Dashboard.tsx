@@ -80,13 +80,24 @@ function Dashboard() {
       event.title.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
+  // Helper: Get the best available date for an event (eventDate if verified, else closeTime)
+  const getEventDate = (event: EarningsEvent): Date | null => {
+    if (event.eventDate && event.eventDateVerified) {
+      return new Date(event.eventDate);
+    }
+    if (event.closeTime) {
+      return new Date(event.closeTime);
+    }
+    return null;
+  };
+
   // Sort events based on selected sort option
   const sortedEvents = [...filteredEvents].sort((a, b) => {
     switch (sortBy) {
       case 'date':
-        // Nearest close time first
-        const dateA = a.closeTime ? new Date(a.closeTime).getTime() : Infinity;
-        const dateB = b.closeTime ? new Date(b.closeTime).getTime() : Infinity;
+        // Nearest earnings call date first (use eventDate if verified, else closeTime)
+        const dateA = getEventDate(a)?.getTime() ?? Infinity;
+        const dateB = getEventDate(b)?.getTime() ?? Infinity;
         return dateA - dateB;
       case 'company':
         // Alphabetical by company name
@@ -184,7 +195,7 @@ function Dashboard() {
               onChange={(e) => setSortBy(e.target.value as 'date' | 'company' | 'volume' | 'markets')}
               className="px-3 py-2 bg-slate-800 border border-slate-700 rounded-lg text-white text-sm focus:outline-none focus:border-slate-600 cursor-pointer"
             >
-              <option value="date">Nearest Date</option>
+              <option value="date">Nearest Earnings</option>
               <option value="company">Company A-Z</option>
               <option value="volume">Highest Volume</option>
               <option value="markets">Most Markets</option>
@@ -241,12 +252,27 @@ function Dashboard() {
                     {event.status}
                   </span>
                 </div>
-                <p className="text-sm text-slate-500 mb-2 line-clamp-2">{event.title}</p>
-                {event.closeTime && (
-                  <p className="text-xs text-blue-400 mb-3">
-                    Market closes:{' '}
-                    {new Date(event.closeTime).toLocaleDateString('en-US', {
+                {/* Earnings Call Date - Primary */}
+                {event.eventDate && event.eventDateVerified ? (
+                  <p className="text-sm font-medium text-white mb-1">
+                    Earnings Call:{' '}
+                    {new Date(event.eventDate).toLocaleDateString('en-US', {
                       weekday: 'short',
+                      month: 'short',
+                      day: 'numeric',
+                      year: 'numeric',
+                    })}
+                  </p>
+                ) : (
+                  <p className="text-sm text-yellow-500 mb-1">
+                    Earnings Date: TBD
+                  </p>
+                )}
+                {/* Betting Closes - Secondary */}
+                {event.closeTime && (
+                  <p className="text-xs text-slate-500 mb-2">
+                    Betting closes:{' '}
+                    {new Date(event.closeTime).toLocaleDateString('en-US', {
                       month: 'short',
                       day: 'numeric',
                       hour: 'numeric',
