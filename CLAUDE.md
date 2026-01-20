@@ -36,19 +36,20 @@ bun run lambda:deploy    # Deploy Lambda functions via SAM
 
 ### Key Paths
 
-| Path | Purpose |
-|------|---------|
-| `src/` | React frontend |
-| `src/pages/` | Page components (Dashboard, EarningsCallDetail) |
-| `src/components/earnings/` | Modular earnings UI components |
-| `src/hooks/useEarningsData.ts` | Custom hook for earnings data |
-| `src/lib/api/` | Kalshi and Data API clients |
-| `src/lib/utils/wordAnalysis.ts` | Word counting utilities |
-| `server/` | Express proxy server |
-| `server/lib/dynamodb.ts` | DynamoDB operations |
-| `server/lib/news.ts` | Google News RSS integration |
-| `scripts/` | Utility scripts |
-| `tests/` | Smoke and unit tests |
+| Path                            | Purpose                                         |
+| ------------------------------- | ----------------------------------------------- |
+| `src/`                          | React frontend                                  |
+| `src/pages/`                    | Page components (Dashboard, EarningsCallDetail) |
+| `src/components/earnings/`      | Modular earnings UI components                  |
+| `src/hooks/useEarningsData.ts`  | Custom hook for earnings data                   |
+| `src/lib/api/`                  | Kalshi and Data API clients                     |
+| `src/lib/utils/wordAnalysis.ts` | Word counting utilities                         |
+| `server/`                       | Express proxy server                            |
+| `server/lib/dynamodb.ts`        | DynamoDB operations                             |
+| `server/lib/news.ts`            | Google News RSS integration                     |
+| `scripts/`                      | Utility scripts                                 |
+| `scripts/scraping/`             | Seeking Alpha transcript scraper (CLI)          |
+| `tests/`                        | Smoke and unit tests                            |
 
 ## Architecture Patterns
 
@@ -70,6 +71,7 @@ bun run lambda:deploy    # Deploy Lambda functions via SAM
 ### Kalshi API Integration
 
 The app integrates with Kalshi's prediction market API:
+
 - RSA-PSS authentication with private key signing
 - Proxy through Express server
 - Endpoints: portfolio balance, positions, fills, markets, orders
@@ -77,11 +79,13 @@ The app integrates with Kalshi's prediction market API:
 ### DynamoDB Single-Table Design
 
 Table: `marketbrewer-earnings-call`
+
 - PK/SK pattern
 - **No GSIs** - Use scan with filters (cost optimization per user requirement)
 - TTL: `expiresAt` for news cache
 
 Entity patterns:
+
 ```
 Transcripts:     PK=TRANSCRIPT#{eventTicker}  SK=DATE#{date}
 Notes:           PK=NOTE#{eventTicker}        SK=TIMESTAMP#{timestamp}
@@ -93,12 +97,14 @@ NewsCache:       PK=NEWSCACHE#{word}          SK=DATE#{date}
 ## Key Features
 
 ### Dashboard Page (`/`)
+
 - Grid of 77+ earnings call events
 - Search/filter by company name
 - Stats: portfolio balance, positions, P&L, active events
 - Click to view event detail
 
 ### Earnings Call Detail Page (`/earnings/:company/:eventTicker`)
+
 - **Word Bets Tab**: Kalshi market prices, volume, implied probabilities
 - **Transcripts Tab**: Upload/analyze quarterly transcripts
 - **Notes Tab**: Personal research notes
@@ -110,11 +116,13 @@ NewsCache:       PK=NEWSCACHE#{word}          SK=DATE#{date}
 Word matching for MENTION contracts:
 
 **Included (count as matches):**
+
 - Exact word (case-insensitive)
 - Plurals: "growth" → "growths"
 - Possessives: "Tesla" → "Tesla's"
 
 **Excluded (do NOT count):**
+
 - Grammatical inflections: "grow" ≠ "growing"
 - Closed compounds: "fire" ≠ "firetruck"
 - Partial matches: "revenue" ≠ "prerevenue"
@@ -123,39 +131,39 @@ Word matching for MENTION contracts:
 
 ### Kalshi Proxy
 
-| Endpoint | Description |
-|----------|-------------|
-| `GET /api/kalshi/portfolio/balance` | Account balance |
+| Endpoint                              | Description       |
+| ------------------------------------- | ----------------- |
+| `GET /api/kalshi/portfolio/balance`   | Account balance   |
 | `GET /api/kalshi/portfolio/positions` | Current positions |
-| `GET /api/kalshi/markets` | Market listings |
-| `POST /api/kalshi/portfolio/orders` | Place order |
+| `GET /api/kalshi/markets`             | Market listings   |
+| `POST /api/kalshi/portfolio/orders`   | Place order       |
 
 ### Earnings Events
 
-| Endpoint | Description |
-|----------|-------------|
-| `GET /api/earnings` | List all events (77+) |
-| `GET /api/earnings/company/:company` | Events for company |
-| `GET /api/earnings/:company/:eventTicker` | Single event |
-| `POST /api/earnings` | Create/update event |
+| Endpoint                                  | Description           |
+| ----------------------------------------- | --------------------- |
+| `GET /api/earnings`                       | List all events (77+) |
+| `GET /api/earnings/company/:company`      | Events for company    |
+| `GET /api/earnings/:company/:eventTicker` | Single event          |
+| `POST /api/earnings`                      | Create/update event   |
 
 ### Data Persistence
 
-| Endpoint | Description |
-|----------|-------------|
-| `POST /api/transcripts` | Save transcript |
+| Endpoint                            | Description     |
+| ----------------------------------- | --------------- |
+| `POST /api/transcripts`             | Save transcript |
 | `GET /api/transcripts/:eventTicker` | Get transcripts |
-| `POST /api/notes` | Save note |
-| `GET /api/notes/:eventTicker` | Get notes |
-| `POST /api/bets` | Save bet |
-| `GET /api/bets` | Get all bets |
+| `POST /api/notes`                   | Save note       |
+| `GET /api/notes/:eventTicker`       | Get notes       |
+| `POST /api/bets`                    | Save bet        |
+| `GET /api/bets`                     | Get all bets    |
 
 ### News (Google RSS)
 
-| Endpoint | Description |
-|----------|-------------|
-| `GET /api/news/:word` | News for word |
-| `POST /api/news/batch` | Batch fetch |
+| Endpoint                  | Description        |
+| ------------------------- | ------------------ |
+| `GET /api/news/:word`     | News for word      |
+| `POST /api/news/batch`    | Batch fetch        |
 | `POST /api/news/trending` | Get trending words |
 
 ## Environment Variables
@@ -184,6 +192,8 @@ SERVER_PORT=3001
 4. **77 companies imported** - Run `bun run scripts/import-earnings-events.ts` to refresh
 
 5. **News caching** - 6-hour TTL in DynamoDB with Google News RSS
+
+6. **Scraper status** - scripts/scraping is CLI-only (supports --save to DynamoDB); API ingest does not yet run validator/audit pipeline
 
 ## Data Flow
 

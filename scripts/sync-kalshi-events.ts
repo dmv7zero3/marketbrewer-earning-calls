@@ -322,6 +322,52 @@ function extractCompanyName(title: string): string {
 }
 
 /**
+ * Extract expected earnings date from event ticker
+ *
+ * Note: Kalshi ticker dates have different meanings:
+ * - Old format: KXEARNINGSMENTIONEA-25OCT28 → October 28, 2025 (actual expected earnings date)
+ * - New format: KXEARNINGSMENTIONTSLA-26JUN30 → June 30, 2026 (expiration deadline, NOT earnings date)
+ *
+ * For new Q2+ 2026 tickers, this is the expiration deadline, not the actual earnings date.
+ * We should NOT use these as eventDate since they're misleading.
+ *
+ * Returns null for dates that appear to be expiration deadlines (Jun 30, Dec 31, etc.)
+ */
+function extractDateFromTicker(ticker: string): string | null {
+  // Pattern: -YYMMMDD at the end (e.g., -25OCT28, -26JUN30)
+  const match = ticker.match(/-(\d{2})([A-Z]{3})(\d{2})$/i);
+  if (!match) return null;
+
+  const [, yearStr, monthStr, dayStr] = match;
+  const year = 2000 + parseInt(yearStr, 10);
+  const day = parseInt(dayStr, 10);
+
+  const monthMap: Record<string, number> = {
+    JAN: 0, FEB: 1, MAR: 2, APR: 3, MAY: 4, JUN: 5,
+    JUL: 6, AUG: 7, SEP: 8, OCT: 9, NOV: 10, DEC: 11,
+  };
+
+  const month = monthMap[monthStr.toUpperCase()];
+  if (month === undefined) return null;
+
+  // Skip dates that are clearly expiration deadlines (end of quarter dates)
+  // These are NOT actual earnings call dates
+  const isExpirationDeadline = (
+    (month === 5 && day === 30) ||  // Jun 30
+    (month === 2 && day === 31) ||  // Mar 31
+    (month === 8 && day === 30) ||  // Sep 30
+    (month === 11 && day === 31)    // Dec 31
+  );
+
+  if (isExpirationDeadline) {
+    return null; // Don't use expiration deadlines as earnings dates
+  }
+
+  const date = new Date(Date.UTC(year, month, day, 12, 0, 0));
+  return date.toISOString();
+}
+
+/**
  * Get earliest close_time from markets (when betting closes)
  */
 function getEarliestCloseTime(markets: KalshiMarket[]): string | null {
@@ -421,8 +467,12 @@ async function syncKalshiEvents() {
     console.log('Kalshi Events:');
     for (const event of kalshiEvents) {
       const company = extractCompanyName(event.title);
+      const tickerDate = extractDateFromTicker(event.event_ticker);
       console.log(`  ${company} (${event.event_ticker})`);
       console.log(`    strike_date: ${event.strike_date || 'NOT SET'}`);
+      if (tickerDate) {
+        console.log(`    ticker_date: ${tickerDate.split('T')[0]} (extracted from ticker)`);
+      }
       console.log(`    strike_period: ${event.strike_period || 'N/A'}`);
       if (event.markets && event.markets.length > 0) {
         const closeTime = getEarliestCloseTime(event.markets);
@@ -454,7 +504,8 @@ async function syncKalshiEvents() {
 
     // Determine eventDate:
     // 1. Use strike_date if available (most accurate)
-    // 2. Otherwise, leave eventDate empty (don't use close_time as event date)
+    // 2. Try to extract from event ticker (e.g., KXEARNINGSMENTIONEA-25OCT28 → Oct 28, 2025)
+    // 3. Otherwise, leave eventDate empty
     let eventDate: string | undefined = undefined;
     let eventDateSource: 'kalshi' | undefined = undefined;
     let eventDateVerified = false;
@@ -465,10 +516,18 @@ async function syncKalshiEvents() {
       eventDateSource = 'kalshi';
       eventDateVerified = true;
       eventDateConfidence = 100;
-    } else if (kalshiEvent.strike_period) {
-      // strike_period exists but no exact date - lower confidence
-      // Don't set eventDate, but note the period
-      eventDateConfidence = 50;
+    } else {
+      // Try to extract date from ticker (e.g., -25OCT28 → October 28, 2025)
+      const tickerDate = extractDateFromTicker(kalshiEvent.event_ticker);
+      if (tickerDate) {
+        eventDate = tickerDate;
+        eventDateSource = 'kalshi';
+        eventDateVerified = true;
+        eventDateConfidence = 90; // Slightly lower confidence than strike_date
+      } else if (kalshiEvent.strike_period) {
+        // strike_period exists but no exact date - lower confidence
+        eventDateConfidence = 50;
+      }
     }
 
     // Check if update is needed
@@ -486,9 +545,10 @@ async function syncKalshiEvents() {
       console.log(`Updating ${company}:`);
 
       if (eventDate) {
-        console.log(`  eventDate: ${dbEvent.eventDate || 'none'} → ${eventDate} (from strike_date)`);
+        const source = kalshiEvent.strike_date ? 'strike_date' : 'ticker';
+        console.log(`  eventDate: ${dbEvent.eventDate || 'none'} → ${eventDate} (from ${source})`);
       } else {
-        console.log(`  eventDate: NOT AVAILABLE (no strike_date from Kalshi)`);
+        console.log(`  eventDate: NOT AVAILABLE (no strike_date or ticker date)`);
       }
 
       if (closeTime) {
@@ -505,13 +565,14 @@ async function syncKalshiEvents() {
       }
 
       // Map markets
+      // Note: Kalshi API returns prices as integers (0-100), not decimals
       const updatedMarkets = kalshiEvent.markets
         ? kalshiEvent.markets.map((m) => ({
             ticker: m.ticker,
             word: m.yes_sub_title || m.subtitle || m.ticker.split('-').pop() || '',
-            yesPrice: Math.round((m.yes_bid || m.last_price || 0) * 100),
-            noPrice: Math.round((m.no_bid || (1 - (m.last_price || 0))) * 100),
-            lastPrice: Math.round((m.last_price || 0) * 100),
+            yesPrice: m.yes_bid || m.last_price || 0,
+            noPrice: m.no_bid || (100 - (m.last_price || 0)),
+            lastPrice: m.last_price || 0,
             volume: m.volume || 0,
             status: mapMarketStatus(m.status),
           }))

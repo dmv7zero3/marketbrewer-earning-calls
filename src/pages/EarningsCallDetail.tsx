@@ -39,6 +39,8 @@ function EarningsCallDetail() {
     quarterlyAnalysis,
     newsData,
     loadingNews,
+    isWebSocketConnected,
+    isKalshiLive,
   } = useEarningsData(decodedCompany, decodedEventTicker);
 
   // UI state
@@ -91,6 +93,11 @@ function EarningsCallDetail() {
     );
   };
 
+  // Handle transcript deleted
+  const handleTranscriptDeleted = (deletedTranscript: Transcript) => {
+    setTranscripts(transcripts.filter((t) => t.SK !== deletedTranscript.SK));
+  };
+
   // Tab configuration
   const tabs: { id: TabId; label: string }[] = [
     { id: 'market', label: 'Word Bets' },
@@ -106,8 +113,18 @@ function EarningsCallDetail() {
         to="/"
         className="inline-flex items-center text-slate-400 hover:text-white mb-6 transition-colors"
       >
-        <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+        <svg
+          className="w-4 h-4 mr-2"
+          fill="none"
+          stroke="currentColor"
+          viewBox="0 0 24 24"
+        >
+          <path
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            strokeWidth={2}
+            d="M15 19l-7-7 7-7"
+          />
         </svg>
         Back to Dashboard
       </Link>
@@ -121,6 +138,21 @@ function EarningsCallDetail() {
               ${earningsEvent.stockTicker}
             </span>
           )}
+          {/* Live WebSocket Status Indicator */}
+          <div className="flex items-center gap-1.5 ml-auto">
+            <span
+              className={`w-2 h-2 rounded-full ${
+                isKalshiLive
+                  ? 'bg-profit-500 animate-pulse'
+                  : isWebSocketConnected
+                  ? 'bg-yellow-500'
+                  : 'bg-slate-600'
+              }`}
+            />
+            <span className="text-xs text-slate-500">
+              {isKalshiLive ? 'LIVE' : isWebSocketConnected ? 'Connecting...' : 'Offline'}
+            </span>
+          </div>
         </div>
         <h1 className="text-2xl font-bold text-white mb-2">
           What will {companyName} say during their next earnings call?
@@ -129,16 +161,32 @@ function EarningsCallDetail() {
           <span>{wordBets.length} words available</span>
           <span>·</span>
           <span>
-            ${wordBets.reduce((sum, b) => sum + b.volume, 0).toLocaleString()} total volume
+            ${wordBets.reduce((sum, b) => sum + b.volume, 0).toLocaleString()} total
+            volume
           </span>
           <span>·</span>
           <span>{transcripts.length} transcripts saved</span>
-          {earningsEvent?.eventDate && (
+          {earningsEvent?.eventDate && earningsEvent?.eventDateVerified && (
             <>
               <span>·</span>
-              <span className="text-blue-400">
+              <span className="text-blue-400" title="Earnings Call">
                 {new Date(earningsEvent.eventDate).toLocaleDateString('en-US', {
                   weekday: 'short',
+                  month: 'short',
+                  day: 'numeric',
+                  hour: 'numeric',
+                  minute: '2-digit',
+                  timeZoneName: 'short',
+                })}
+              </span>
+            </>
+          )}
+          {earningsEvent?.closeTime && (
+            <>
+              <span>·</span>
+              <span className="text-slate-500" title="Betting Closes">
+                Betting closes:{' '}
+                {new Date(earningsEvent.closeTime).toLocaleDateString('en-US', {
                   month: 'short',
                   day: 'numeric',
                   hour: 'numeric',
@@ -156,8 +204,18 @@ function EarningsCallDetail() {
                 rel="noopener noreferrer"
                 className="inline-flex items-center gap-1 text-profit-400 hover:text-profit-300 transition-colors"
               >
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                <svg
+                  className="w-4 h-4"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"
+                  />
                 </svg>
                 Seeking Alpha Transcripts
               </a>
@@ -230,6 +288,7 @@ function EarningsCallDetail() {
               transcripts={transcripts}
               onTranscriptSaved={handleTranscriptSaved}
               onTranscriptUpdated={handleTranscriptUpdated}
+              onTranscriptDeleted={handleTranscriptDeleted}
             />
           )}
 

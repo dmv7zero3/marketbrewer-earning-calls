@@ -70,6 +70,13 @@ function Dashboard() {
     if (!hasOpenMarkets(event)) {
       return false;
     }
+    // Exclude events where the verified earnings date is in the past
+    if (event.eventDate && event.eventDateVerified) {
+      const eventDate = new Date(event.eventDate);
+      if (eventDate < new Date()) {
+        return false;
+      }
+    }
     return true;
   });
 
@@ -89,6 +96,31 @@ function Dashboard() {
       return new Date(event.closeTime);
     }
     return null;
+  };
+
+  // Helper: Get countdown text for an event
+  const getCountdownText = (event: EarningsEvent): { text: string; urgent: boolean } | null => {
+    if (!event.eventDate || !event.eventDateVerified) {
+      return null;
+    }
+    const eventDate = new Date(event.eventDate);
+    const diffMs = eventDate.getTime() - now.getTime();
+    const diffHours = Math.floor(diffMs / (1000 * 60 * 60));
+    const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+
+    if (diffHours < 0) {
+      return null; // Past event
+    }
+    if (diffHours < 24) {
+      return { text: diffHours <= 1 ? 'Today' : `${diffHours}h`, urgent: true };
+    }
+    if (diffDays === 1) {
+      return { text: 'Tomorrow', urgent: true };
+    }
+    if (diffDays <= 7) {
+      return { text: `${diffDays} days`, urgent: false };
+    }
+    return { text: `${diffDays} days`, urgent: false };
   };
 
   // Sort events based on selected sort option
@@ -232,68 +264,79 @@ function Dashboard() {
           </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {sortedEvents.map((event) => (
-              <Link
-                key={event.eventTicker}
-                to={`/earnings/${encodeURIComponent(event.company)}/${encodeURIComponent(event.eventTicker)}`}
-                className="card block hover:border-slate-600 transition-colors"
-              >
-                <div className="flex items-start justify-between mb-2">
-                  <span className="text-lg font-bold text-white">{event.company}</span>
-                  <span
-                    className={`px-2 py-0.5 text-xs rounded ${
-                      event.status === 'active'
-                        ? 'bg-profit-500/20 text-profit-400'
-                        : event.status === 'upcoming'
-                          ? 'bg-blue-500/20 text-blue-400'
-                          : 'bg-slate-700 text-slate-400'
-                    }`}
-                  >
-                    {event.status}
-                  </span>
-                </div>
-                {/* Earnings Call Date - Primary */}
-                {event.eventDate && event.eventDateVerified ? (
-                  <p className="text-sm font-medium text-white mb-1">
-                    Earnings Call:{' '}
-                    {new Date(event.eventDate).toLocaleDateString('en-US', {
-                      weekday: 'short',
-                      month: 'short',
-                      day: 'numeric',
-                      year: 'numeric',
-                    })}
-                  </p>
-                ) : (
-                  <p className="text-sm text-yellow-500 mb-1">
-                    Earnings Date: TBD
-                  </p>
-                )}
-                {/* Betting Closes - Secondary */}
-                {event.closeTime && (
-                  <p className="text-xs text-slate-500 mb-2">
-                    Betting closes:{' '}
-                    {new Date(event.closeTime).toLocaleDateString('en-US', {
-                      month: 'short',
-                      day: 'numeric',
-                      hour: 'numeric',
-                      minute: '2-digit',
-                    })}
-                  </p>
-                )}
-                <div className="flex items-center justify-between text-xs">
-                  <span className="text-slate-500">
-                    {event.marketCount > 0
-                      ? `${event.marketCount} word bets`
-                      : 'No word bets yet'}
-                  </span>
-                  {event.totalVolume > 0 && (
-                    <span className="font-mono text-slate-400">
-                      ${event.totalVolume.toLocaleString()} vol
-                    </span>
+            {sortedEvents.map((event) => {
+              const countdown = getCountdownText(event);
+              return (
+                <Link
+                  key={event.eventTicker}
+                  to={`/earnings/${encodeURIComponent(event.company)}/${encodeURIComponent(event.eventTicker)}`}
+                  className="card block hover:border-slate-600 transition-colors"
+                >
+                  {/* Header Row: Company + Countdown Badge */}
+                  <div className="flex items-start justify-between mb-3">
+                    <div className="flex items-center gap-2">
+                      <span className="text-lg font-bold text-white">{event.company}</span>
+                      {event.stockTicker && (
+                        <span className="text-xs font-mono text-blue-400 bg-blue-500/10 px-1.5 py-0.5 rounded">
+                          ${event.stockTicker}
+                        </span>
+                      )}
+                    </div>
+                    {countdown ? (
+                      <span
+                        className={`px-2 py-0.5 text-xs font-medium rounded ${
+                          countdown.urgent
+                            ? 'bg-orange-500/20 text-orange-400'
+                            : 'bg-slate-700 text-slate-300'
+                        }`}
+                      >
+                        {countdown.text}
+                      </span>
+                    ) : (
+                      <span className="px-2 py-0.5 text-xs rounded bg-yellow-500/20 text-yellow-400">
+                        TBD
+                      </span>
+                    )}
+                  </div>
+
+                  {/* Earnings Call Date */}
+                  {event.eventDate && event.eventDateVerified ? (
+                    <p className="text-sm text-slate-300 mb-1">
+                      <span className="text-slate-500">Earnings:</span>{' '}
+                      {new Date(event.eventDate).toLocaleDateString('en-US', {
+                        weekday: 'short',
+                        month: 'short',
+                        day: 'numeric',
+                      })}{' '}
+                      <span className="text-slate-500">
+                        {new Date(event.eventDate).toLocaleTimeString('en-US', {
+                          hour: 'numeric',
+                          minute: '2-digit',
+                        })}
+                      </span>
+                    </p>
+                  ) : (
+                    <p className="text-sm text-yellow-500/70 mb-1">
+                      Earnings date not confirmed
+                    </p>
                   )}
-                </div>
-              </Link>
-            ))}
+
+                  {/* Market Stats Row */}
+                  <div className="flex items-center justify-between text-xs mt-3 pt-3 border-t border-slate-800">
+                    <span className="text-slate-500">
+                      {event.marketCount > 0
+                        ? `${event.marketCount} words`
+                        : 'No bets yet'}
+                    </span>
+                    {event.totalVolume > 0 && (
+                      <span className="font-mono text-profit-400">
+                        ${event.totalVolume.toLocaleString()}
+                      </span>
+                    )}
+                  </div>
+                </Link>
+              );
+            })}
           </div>
         )}
       </section>

@@ -65,9 +65,16 @@ export interface BetRecord {
   pnl?: number;
 }
 
+export interface NewsRecency {
+  today: number;
+  thisWeek: number;
+  total: number;
+}
+
 export interface NewsResult {
   word: string;
   articleCount: number;
+  recency: NewsRecency;
   trending: boolean;
   articles: Array<{
     title: string;
@@ -189,6 +196,18 @@ export async function verifyTranscript(
     {
       method: 'PATCH',
       body: JSON.stringify({ status, notes }),
+    }
+  );
+}
+
+export async function deleteTranscript(
+  eventTicker: string,
+  date: string
+): Promise<void> {
+  await fetchApi(
+    `/transcripts/${encodeURIComponent(eventTicker)}/${encodeURIComponent(date)}`,
+    {
+      method: 'DELETE',
     }
   );
 }

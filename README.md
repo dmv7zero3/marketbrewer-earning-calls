@@ -53,17 +53,37 @@ SERVER_PORT=3001
 
 ## Scripts
 
-| Command | Description |
-|---------|-------------|
-| `bun start` | Start frontend dev server (port 3000) |
-| `bun run server` | Start backend API server (port 3001) |
-| `bun run dev:all` | Start both servers concurrently |
-| `bun test` | Run all tests |
-| `bun test:unit` | Run unit tests only |
-| `bun test:smoke` | Run smoke tests only |
-| `bun run type-check` | TypeScript type checking |
-| `bun run lint` | ESLint |
-| `bun run build` | Production build |
+| Command                                                                    | Description                                |
+| -------------------------------------------------------------------------- | ------------------------------------------ |
+| `bun start`                                                                | Start frontend dev server (port 3000)      |
+| `bun run server`                                                           | Start backend API server (port 3001)       |
+| `bun run dev:all`                                                          | Start both servers concurrently            |
+| `bun test`                                                                 | Run all tests                              |
+| `bun test:unit`                                                            | Run unit tests only                        |
+| `bun test:smoke`                                                           | Run smoke tests only                       |
+| `bun run type-check`                                                       | TypeScript type checking                   |
+| `bun run lint`                                                             | ESLint                                     |
+| `bun run build`                                                            | Production build                           |
+| `bun run scripts/scraping/index.ts --ticker AAPL --quarter Q4 --year 2025` | Run Seeking Alpha transcript scraper (CLI) |
+
+## Seeking Alpha Transcript Scraper (CLI)
+
+The repository includes a full scraping pipeline under scripts/scraping that handles:
+
+- Browser automation with rate limiting and retries
+- HTML parsing and content extraction
+- Multi-layer validation with confidence scoring
+- Audit logging (JSONL files written to ./audit-logs by default)
+
+Current status:
+
+- The scraper is a CLI tool that can persist validated transcripts to DynamoDB with `--save`.
+- The API endpoint POST /api/transcripts accepts uploads without running the validator pipeline.
+
+Example usage:
+
+- bun run scripts/scraping/index.ts --ticker AAPL --quarter Q4 --year 2025 --dry-run
+- bun run scripts/scraping/index.ts --url https://seekingalpha.com/article/... --company Apple --event-ticker AAPL-24Q4-MENTION --save
 
 ## Project Structure
 
@@ -86,7 +106,12 @@ marketbrewer-earnings-call/
 │       ├── dynamodb.ts     # DynamoDB operations
 │       └── news.ts         # Google News RSS integration
 ├── scripts/                # Utility scripts
-│   └── import-earnings-events.ts  # Import events to DynamoDB
+│   ├── import-earnings-events.ts  # Import events to DynamoDB
+│   └── scraping/            # Seeking Alpha transcript scraper (CLI)
+│       ├── scraper.ts       # Puppeteer automation + rate limiting
+│       ├── parser.ts        # HTML extraction
+│       ├── validators/      # Multi-layer validation + confidence
+│       └── audit/           # Audit log + summary
 ├── tests/                  # Test files
 │   ├── smoke.test.ts       # API smoke tests
 │   └── unit/               # Unit tests
@@ -98,51 +123,51 @@ marketbrewer-earnings-call/
 
 ### Kalshi Proxy
 
-| Endpoint | Description |
-|----------|-------------|
-| `GET /api/kalshi/portfolio/balance` | Account balance |
+| Endpoint                              | Description       |
+| ------------------------------------- | ----------------- |
+| `GET /api/kalshi/portfolio/balance`   | Account balance   |
 | `GET /api/kalshi/portfolio/positions` | Current positions |
-| `GET /api/kalshi/markets` | Market listings |
-| `POST /api/kalshi/portfolio/orders` | Place order |
+| `GET /api/kalshi/markets`             | Market listings   |
+| `POST /api/kalshi/portfolio/orders`   | Place order       |
 
 ### Earnings Events
 
-| Endpoint | Description |
-|----------|-------------|
-| `GET /api/earnings` | List all earnings events |
-| `GET /api/earnings/:company/:eventTicker` | Get specific event |
-| `POST /api/earnings` | Create/update event |
+| Endpoint                                  | Description              |
+| ----------------------------------------- | ------------------------ |
+| `GET /api/earnings`                       | List all earnings events |
+| `GET /api/earnings/:company/:eventTicker` | Get specific event       |
+| `POST /api/earnings`                      | Create/update event      |
 
 ### Data Persistence
 
-| Endpoint | Description |
-|----------|-------------|
-| `POST /api/transcripts` | Save transcript |
-| `GET /api/transcripts/:eventTicker` | Get transcripts |
-| `POST /api/notes` | Save research note |
-| `GET /api/notes/:eventTicker` | Get notes |
-| `POST /api/bets` | Save bet record |
-| `GET /api/bets` | Get all bets |
+| Endpoint                            | Description        |
+| ----------------------------------- | ------------------ |
+| `POST /api/transcripts`             | Save transcript    |
+| `GET /api/transcripts/:eventTicker` | Get transcripts    |
+| `POST /api/notes`                   | Save research note |
+| `GET /api/notes/:eventTicker`       | Get notes          |
+| `POST /api/bets`                    | Save bet record    |
+| `GET /api/bets`                     | Get all bets       |
 
 ### News
 
-| Endpoint | Description |
-|----------|-------------|
-| `GET /api/news/:word` | Get news for word |
-| `POST /api/news/batch` | Batch fetch news |
+| Endpoint                  | Description        |
+| ------------------------- | ------------------ |
+| `GET /api/news/:word`     | Get news for word  |
+| `POST /api/news/batch`    | Batch fetch news   |
 | `POST /api/news/trending` | Get trending words |
 
 ## DynamoDB Schema
 
 Single-table design with PK/SK pattern (no GSIs for cost optimization):
 
-| Entity | PK | SK |
-|--------|----|----|
-| Transcript | `TRANSCRIPT#{eventTicker}` | `DATE#{date}` |
-| Note | `NOTE#{eventTicker}` | `TIMESTAMP#{timestamp}` |
-| Bet | `BET#{betId}` | `METADATA` |
-| EarningsEvent | `EARNINGS#{company}` | `EVENT#{eventTicker}` |
-| NewsCache | `NEWSCACHE#{word}` | `DATE#{date}` |
+| Entity        | PK                         | SK                      |
+| ------------- | -------------------------- | ----------------------- |
+| Transcript    | `TRANSCRIPT#{eventTicker}` | `DATE#{date}`           |
+| Note          | `NOTE#{eventTicker}`       | `TIMESTAMP#{timestamp}` |
+| Bet           | `BET#{betId}`              | `METADATA`              |
+| EarningsEvent | `EARNINGS#{company}`       | `EVENT#{eventTicker}`   |
+| NewsCache     | `NEWSCACHE#{word}`         | `DATE#{date}`           |
 
 ## Kalshi MENTION Rules
 

@@ -406,12 +406,13 @@ async function syncKalshiDates() {
       console.log(`    EventDate: ${kalshiEvent.closeTime} (verified from Kalshi)`);
 
       // Update markets with Kalshi data
+      // Note: Kalshi API returns prices as integers (0-100), not decimals
       const updatedMarkets = kalshiEvent.markets.map((m) => ({
         ticker: m.ticker,
         word: m.yes_sub_title || m.subtitle || m.ticker.split('-').pop() || '',
-        yesPrice: Math.round((m.yes_bid || m.last_price || 0) * 100),
-        noPrice: Math.round((m.no_bid || 1 - (m.last_price || 0)) * 100),
-        lastPrice: Math.round((m.last_price || 0) * 100),
+        yesPrice: m.yes_bid || m.last_price || 0,
+        noPrice: m.no_bid || (100 - (m.last_price || 0)),
+        lastPrice: m.last_price || 0,
         volume: m.volume || 0,
         status: m.status || 'open',
       }));

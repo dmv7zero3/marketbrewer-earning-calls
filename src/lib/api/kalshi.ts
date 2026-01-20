@@ -265,12 +265,13 @@ export function marketToMentionWord(market: KalshiMarket): {
   const word = market.yes_sub_title || market.subtitle || market.ticker;
 
   // Calculate chance from yes_bid (market implied probability)
-  const yesPrice = Math.round((market.yes_bid || market.last_price) * 100);
+  // Note: Kalshi API returns prices as integers (0-100), not decimals
+  const yesPrice = market.yes_bid || market.last_price || 0;
   const noPrice = 100 - yesPrice;
   const chance = yesPrice;
 
   // Price change from previous
-  const prevPrice = Math.round((market.previous_price || market.last_price) * 100);
+  const prevPrice = market.previous_price || market.last_price || 0;
   const priceChange = yesPrice - prevPrice;
 
   return {

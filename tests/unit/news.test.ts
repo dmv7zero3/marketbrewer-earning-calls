@@ -124,28 +124,41 @@ describe('Article Format', () => {
     }
   });
 
-  it('should limit articles to 20', async () => {
+  it('should return all available articles (no artificial limit)', async () => {
     const result = await fetchNewsForWord('technology');
-    expect(result.articles.length).toBeLessThanOrEqual(20);
+    // Google News RSS typically returns up to ~100 articles
+    expect(result.articles.length).toBeGreaterThan(0);
+    expect(result.articleCount).toBe(result.articles.length);
   });
 });
 
 describe('Trending Threshold', () => {
-  it('should mark as trending when 5+ articles found', async () => {
+  it('should mark as trending based on recency (3+ today or 5+ this week)', async () => {
     // AI is usually trending
     const result = await fetchNewsForWord('AI');
 
-    // If we got 5+ articles, should be trending
-    if (result.articleCount >= 5) {
-      expect(result.trending).toBe(true);
-    }
+    // Should be trending if 3+ articles today or 5+ this week
+    const shouldBeTrending = result.recency.today >= 3 || result.recency.thisWeek >= 5;
+    expect(result.trending).toBe(shouldBeTrending);
   });
 
-  it('should not mark as trending when < 5 articles', async () => {
-    // Very obscure word should have few articles
+  it('should return recency breakdown', async () => {
+    const result = await fetchNewsForWord('AI');
+
+    expect(typeof result.recency.today).toBe('number');
+    expect(typeof result.recency.thisWeek).toBe('number');
+    expect(typeof result.recency.total).toBe('number');
+    expect(result.recency.total).toBe(result.articleCount);
+    expect(result.recency.thisWeek).toBeGreaterThanOrEqual(result.recency.today);
+  });
+
+  it('should not mark as trending when no recent articles', async () => {
+    // Very obscure word should have no articles
     const result = await fetchNewsForWord('xyzzynotreal123');
 
-    expect(result.articleCount).toBeLessThan(5);
+    expect(result.articleCount).toBe(0);
+    expect(result.recency.today).toBe(0);
+    expect(result.recency.thisWeek).toBe(0);
     expect(result.trending).toBe(false);
   });
 });

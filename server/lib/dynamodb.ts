@@ -257,6 +257,18 @@ export async function getPendingTranscripts(): Promise<Transcript[]> {
   return (result.Items as Transcript[]) || [];
 }
 
+export async function deleteTranscript(eventTicker: string, date: string): Promise<void> {
+  await docClient.send(
+    new DeleteCommand({
+      TableName: TABLE_NAME,
+      Key: {
+        PK: `TRANSCRIPT#${eventTicker}`,
+        SK: `DATE#${date}`,
+      },
+    })
+  );
+}
+
 // Research Note Functions
 export async function saveNote(
   note: Omit<ResearchNote, 'PK' | 'SK' | 'createdAt' | 'updatedAt'>

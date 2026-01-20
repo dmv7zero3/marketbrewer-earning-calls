@@ -4,6 +4,8 @@ import cors from 'cors';
 import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
+import { createServer } from 'http';
+import { WebSocketServer, WebSocket } from 'ws';
 
 // Import DynamoDB and News modules
 import {
@@ -14,6 +16,7 @@ import {
   updateTranscriptVerification,
   updateEarningsEventDate,
   getPendingTranscripts,
+  deleteTranscript,
   saveNote,
   getNotesForEvent,
   deleteNote,
@@ -29,8 +32,10 @@ import {
   deleteEarningsEvent,
 } from './lib/dynamodb';
 import { fetchNewsForWord, fetchNewsForWords, getTrendingWords } from './lib/news';
+import { getKalshiWebSocketClient, KalshiWebSocketClient } from './lib/kalshi-websocket';
 
 const app = express();
+const server = createServer(app);
 const PORT = process.env.SERVER_PORT || 3001;
 
 // Kalshi API configuration
@@ -360,6 +365,20 @@ app.patch('/api/transcripts/:eventTicker/:date/verify', async (req, res) => {
   }
 });
 
+// Delete a transcript
+app.delete('/api/transcripts/:eventTicker/:date', async (req, res) => {
+  try {
+    await deleteTranscript(
+      decodeURIComponent(req.params.eventTicker),
+      decodeURIComponent(req.params.date)
+    );
+    res.status(204).send();
+  } catch (error) {
+    console.error('Error deleting transcript:', error);
+    res.status(500).json({ error: 'Failed to delete transcript' });
+  }
+});
+
 // ===========================================
 // Research Notes Endpoints
 // ===========================================
@@ -675,8 +694,180 @@ app.delete('/api/earnings/:company/:eventTicker', async (req, res) => {
   }
 });
 
-app.listen(PORT, () => {
+// ===========================================
+// WebSocket Server for Real-time Updates
+// ===========================================
+
+// Create WebSocket server for frontend clients
+const wss = new WebSocketServer({ server, path: '/ws' });
+
+// Track connected clients and their subscriptions
+interface ClientSubscription {
+  ws: WebSocket;
+  marketTickers: Set<string>;
+}
+const clients = new Map<WebSocket, ClientSubscription>();
+
+// Kalshi WebSocket client (single connection to Kalshi)
+let kalshiWsClient: KalshiWebSocketClient | null = null;
+let kalshiWsConnected = false;
+
+// Initialize Kalshi WebSocket connection
+async function initKalshiWebSocket() {
+  kalshiWsClient = getKalshiWebSocketClient();
+  if (!kalshiWsClient) {
+    console.warn('Kalshi WebSocket client not available (missing credentials)');
+    return;
+  }
+
+  // Set up event handlers
+  kalshiWsClient.on('connected', () => {
+    console.log('Connected to Kalshi WebSocket');
+    kalshiWsConnected = true;
+
+    // Subscribe to all markets that clients are interested in
+    const allTickers = new Set<string>();
+    clients.forEach((sub) => {
+      sub.marketTickers.forEach((ticker) => allTickers.add(ticker));
+    });
+
+    if (allTickers.size > 0) {
+      kalshiWsClient?.subscribeTicker(Array.from(allTickers));
+    }
+  });
+
+  kalshiWsClient.on('disconnected', () => {
+    console.log('Disconnected from Kalshi WebSocket');
+    kalshiWsConnected = false;
+  });
+
+  kalshiWsClient.on('ticker', (data) => {
+    // Broadcast to all clients subscribed to this market
+    const message = JSON.stringify({
+      type: 'ticker',
+      data,
+    });
+
+    clients.forEach((sub, ws) => {
+      if (sub.marketTickers.has(data.market_ticker) && ws.readyState === WebSocket.OPEN) {
+        ws.send(message);
+      }
+    });
+  });
+
+  kalshiWsClient.on('fill', (data) => {
+    // Broadcast fill updates to all connected clients
+    const message = JSON.stringify({
+      type: 'fill',
+      data,
+    });
+
+    clients.forEach((sub, ws) => {
+      if (ws.readyState === WebSocket.OPEN) {
+        ws.send(message);
+      }
+    });
+  });
+
+  kalshiWsClient.on('error', (error) => {
+    console.error('Kalshi WebSocket error:', error);
+  });
+
+  // Connect to Kalshi
+  try {
+    await kalshiWsClient.connect();
+  } catch (error) {
+    console.error('Failed to connect to Kalshi WebSocket:', error);
+  }
+}
+
+// Handle frontend WebSocket connections
+wss.on('connection', (ws) => {
+  console.log('Frontend client connected to WebSocket');
+
+  // Initialize client subscription
+  clients.set(ws, { ws, marketTickers: new Set() });
+
+  // Send connection status
+  ws.send(
+    JSON.stringify({
+      type: 'status',
+      connected: kalshiWsConnected,
+    })
+  );
+
+  // Handle messages from frontend
+  ws.on('message', (data) => {
+    try {
+      const message = JSON.parse(data.toString());
+
+      switch (message.cmd) {
+        case 'subscribe': {
+          // Subscribe to market ticker updates
+          const tickers = message.market_tickers as string[];
+          const sub = clients.get(ws);
+          if (sub && tickers) {
+            tickers.forEach((ticker) => sub.marketTickers.add(ticker));
+
+            // If Kalshi WS is connected, subscribe to new tickers
+            if (kalshiWsConnected && kalshiWsClient) {
+              kalshiWsClient.subscribeTicker(tickers);
+            }
+
+            ws.send(
+              JSON.stringify({
+                type: 'subscribed',
+                market_tickers: tickers,
+              })
+            );
+          }
+          break;
+        }
+
+        case 'unsubscribe': {
+          // Unsubscribe from market ticker updates
+          const tickers = message.market_tickers as string[];
+          const sub = clients.get(ws);
+          if (sub && tickers) {
+            tickers.forEach((ticker) => sub.marketTickers.delete(ticker));
+          }
+          break;
+        }
+
+        case 'ping':
+          ws.send(JSON.stringify({ type: 'pong' }));
+          break;
+      }
+    } catch (error) {
+      console.error('Error handling WebSocket message:', error);
+    }
+  });
+
+  ws.on('close', () => {
+    console.log('Frontend client disconnected');
+    clients.delete(ws);
+  });
+
+  ws.on('error', (error) => {
+    console.error('Frontend WebSocket error:', error);
+    clients.delete(ws);
+  });
+});
+
+// Initialize Kalshi WebSocket on startup
+initKalshiWebSocket();
+
+// WebSocket status endpoint
+app.get('/api/ws/status', (req, res) => {
+  res.json({
+    kalshiConnected: kalshiWsConnected,
+    clientCount: clients.size,
+  });
+});
+
+server.listen(PORT, () => {
   console.log(`Server running on http://localhost:${PORT}`);
+  console.log(`WebSocket available at ws://localhost:${PORT}/ws`);
   console.log(
     `Kalshi API Key ID: ${KALSHI_API_KEY_ID ? 'Configured' : 'Not configured'}`
   );

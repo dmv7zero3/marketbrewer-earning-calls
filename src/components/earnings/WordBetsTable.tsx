@@ -2,7 +2,84 @@
 // Displays Kalshi MENTION word bets with sorting and selection
 
 import { useState } from 'react';
-import { type WordBet } from '@/hooks/useEarningsData';
+import { type WordBet, type NewsRecency } from '@/hooks/useEarningsData';
+
+// Sortable column header
+function SortableHeader({
+  label,
+  sortKey,
+  currentSort,
+  onSort,
+  className = '',
+}: {
+  label: string;
+  sortKey: SortKey;
+  currentSort: SortKey;
+  onSort: (key: SortKey) => void;
+  className?: string;
+}) {
+  const isActive = currentSort === sortKey;
+  return (
+    <button
+      onClick={() => onSort(sortKey)}
+      className={`${className} cursor-pointer hover:text-white transition-colors ${
+        isActive ? 'text-white font-medium' : 'text-slate-500'
+      }`}
+    >
+      {label}
+      {isActive && <span className="ml-1">↓</span>}
+    </button>
+  );
+}
+
+// Display news recency with visual hierarchy
+function NewsRecencyDisplay({ recency }: { recency: NewsRecency }) {
+  const { today, thisWeek, total } = recency;
+
+  // No news at all
+  if (total === 0) {
+    return <span className="font-mono text-sm text-slate-600">—</span>;
+  }
+
+  // Show today count prominently if there are articles today
+  if (today > 0) {
+    return (
+      <div className="flex flex-col items-center">
+        <span className="font-mono text-sm text-yellow-300 font-bold">
+          {today} today
+        </span>
+        {thisWeek > today && (
+          <span className="font-mono text-[10px] text-slate-500">
+            +{thisWeek - today} this week
+          </span>
+        )}
+      </div>
+    );
+  }
+
+  // Show this week count if no articles today
+  if (thisWeek > 0) {
+    return (
+      <div className="flex flex-col items-center">
+        <span className="font-mono text-sm text-yellow-400/70">
+          {thisWeek} this week
+        </span>
+        {total > thisWeek && (
+          <span className="font-mono text-[10px] text-slate-600">
+            {total} total
+          </span>
+        )}
+      </div>
+    );
+  }
+
+  // Only older articles
+  return (
+    <span className="font-mono text-sm text-slate-500">
+      {total} older
+    </span>
+  );
+}
 
 type SortKey = 'chance' | 'transcript' | 'news' | 'volume';
 
@@ -33,7 +110,10 @@ export function WordBetsTable({
       case 'transcript':
         return b.transcriptCount - a.transcriptCount;
       case 'news':
-        return b.newsCount - a.newsCount;
+        // Sort by recency: today first, then thisWeek, then total
+        const aScore = a.newsRecency.today * 1000 + a.newsRecency.thisWeek * 10 + a.newsRecency.total;
+        const bScore = b.newsRecency.today * 1000 + b.newsRecency.thisWeek * 10 + b.newsRecency.total;
+        return bScore - aScore;
       case 'volume':
         return b.volume - a.volume;
       default:
@@ -43,42 +123,47 @@ export function WordBetsTable({
 
   return (
     <>
-      {/* Sort Controls */}
-      <div className="flex items-center gap-2 mb-4">
-        <span className="text-xs text-slate-500">Sort by:</span>
-        {[
-          { key: 'chance', label: 'Chance' },
-          { key: 'transcript', label: 'Transcript' },
-          { key: 'news', label: 'News' },
-          { key: 'volume', label: 'Volume' },
-        ].map((opt) => (
-          <button
-            key={opt.key}
-            onClick={() => setSortBy(opt.key as SortKey)}
-            className={`px-3 py-1 text-xs rounded transition-colors ${
-              sortBy === opt.key
-                ? 'bg-slate-700 text-white'
-                : 'text-slate-400 hover:text-white'
-            }`}
-          >
-            {opt.label}
-          </button>
-        ))}
-        {loadingNews && (
+      {/* Loading indicator */}
+      {loadingNews && (
+        <div className="flex items-center gap-2 mb-2">
           <span className="text-xs text-slate-500 animate-pulse">Loading news...</span>
-        )}
-      </div>
+        </div>
+      )}
 
       {/* Words Table */}
       <div className="card p-0 overflow-hidden">
-        {/* Header */}
-        <div className="grid grid-cols-12 gap-2 px-4 py-3 text-xs text-slate-500 bg-slate-800/50 border-b border-slate-800">
-          <div className="col-span-3">Word</div>
-          <div className="col-span-2 text-center">Chance</div>
-          <div className="col-span-1 text-center">Transcript</div>
-          <div className="col-span-2 text-center">News</div>
-          <div className="col-span-2 text-center">Yes</div>
-          <div className="col-span-2 text-center">No</div>
+        {/* Header - clickable columns for sorting */}
+        <div className="grid grid-cols-12 gap-2 px-4 py-3 text-xs bg-slate-800/50 border-b border-slate-800">
+          <div className="col-span-3 text-slate-500">Word</div>
+          <SortableHeader
+            label="Chance"
+            sortKey="chance"
+            currentSort={sortBy}
+            onSort={setSortBy}
+            className="col-span-2 text-center"
+          />
+          <SortableHeader
+            label="Transcript"
+            sortKey="transcript"
+            currentSort={sortBy}
+            onSort={setSortBy}
+            className="col-span-1 text-center"
+          />
+          <SortableHeader
+            label="News"
+            sortKey="news"
+            currentSort={sortBy}
+            onSort={setSortBy}
+            className="col-span-2 text-center"
+          />
+          <SortableHeader
+            label="Volume"
+            sortKey="volume"
+            currentSort={sortBy}
+            onSort={setSortBy}
+            className="col-span-2 text-center"
+          />
+          <div className="col-span-2 text-center text-slate-500">Trade</div>
         </div>
 
         {/* Loading State */}
@@ -172,42 +257,43 @@ function WordBetRow({ bet, isSelected, onSelect, onBetClick }: WordBetRowProps) 
         </span>
       </div>
 
-      {/* News Count */}
+      {/* News Recency */}
+      <div className="col-span-2 text-center">
+        <NewsRecencyDisplay recency={bet.newsRecency} />
+      </div>
+
+      {/* Volume */}
       <div className="col-span-2 text-center">
         <span
           className={`font-mono text-sm ${
-            bet.newsCount > 0 ? 'text-yellow-400' : 'text-slate-600'
+            bet.volume > 0 ? 'text-slate-300' : 'text-slate-600'
           }`}
         >
-          {bet.newsCount} articles
+          {bet.volume > 0 ? bet.volume.toLocaleString() : '—'}
         </span>
       </div>
 
-      {/* Yes Button */}
-      <div className="col-span-2">
+      {/* Trade Buttons */}
+      <div className="col-span-2 flex gap-1">
         <button
           onClick={(e) => {
             e.stopPropagation();
             onBetClick(bet, 'yes');
           }}
-          className="w-full py-1.5 text-sm font-medium rounded bg-profit-500/10 text-profit-400
+          className="flex-1 py-1 text-xs font-medium rounded bg-profit-500/10 text-profit-400
                    border border-profit-500/30 hover:bg-profit-500/20 transition-colors"
         >
-          Yes {bet.yesPrice}¢
+          Y {bet.yesPrice}¢
         </button>
-      </div>
-
-      {/* No Button */}
-      <div className="col-span-2">
         <button
           onClick={(e) => {
             e.stopPropagation();
             onBetClick(bet, 'no');
           }}
-          className="w-full py-1.5 text-sm font-medium rounded bg-loss-500/10 text-loss-400
+          className="flex-1 py-1 text-xs font-medium rounded bg-loss-500/10 text-loss-400
                    border border-loss-500/30 hover:bg-loss-500/20 transition-colors"
         >
-          No {bet.noPrice}¢
+          N {bet.noPrice}¢
         </button>
       </div>
     </div>

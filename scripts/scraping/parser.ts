@@ -21,7 +21,8 @@ import { generateRawHtmlHash, generateContentHash } from './utils/hashUtils';
  */
 const SELECTORS = {
   // Article content
-  articleBody: '[data-test-id="article-content"], .article-content, article[data-test-id="content-container"] [data-test-id="article-body"]',
+  articleBody:
+    '[data-test-id="article-content"], .article-content, article[data-test-id="content-container"] [data-test-id="article-body"]',
   articleTitle: 'h1[data-test-id="post-title"], h1.article-title, article h1',
 
   // Transcript specific
@@ -32,7 +33,8 @@ const SELECTORS = {
   ticker: '[data-test-id="symbol-link"], a[href*="/symbol/"]',
 
   // Participants section
-  participantsSection: 'h2:contains("Call Participants"), h3:contains("Call Participants"), strong:contains("Call Participants")',
+  participantsSection:
+    'h2:contains("Call Participants"), h3:contains("Call Participants"), strong:contains("Call Participants")',
 
   // Company info
   companyName: '[data-test-id="post-title"], .article-title',
@@ -150,7 +152,10 @@ export function parseTranscriptHtml(html: string, sourceUrl: string): ParseResul
   if (!ticker) {
     const tickerEl = $(SELECTORS.ticker).first();
     if (tickerEl.length > 0) {
-      const tickerText = tickerEl.text().trim().replace(/[\(\)]/g, '');
+      const tickerText = tickerEl
+        .text()
+        .trim()
+        .replace(/[\(\)]/g, '');
       if (/^[A-Z]{1,5}$/i.test(tickerText)) {
         ticker = tickerText.toUpperCase();
         foundSelectors.push('ticker');
@@ -177,7 +182,8 @@ export function parseTranscriptHtml(html: string, sourceUrl: string): ParseResul
     }
   } else {
     // Try to find date in article
-    const datePattern = /(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s+\d{1,2},?\s+\d{4}/i;
+    const datePattern =
+      /(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s+\d{1,2},?\s+\d{4}/i;
     const bodyText = $('body').text();
     const dateMatch = bodyText.match(datePattern);
     if (dateMatch) {
@@ -200,10 +206,13 @@ export function parseTranscriptHtml(html: string, sourceUrl: string): ParseResul
 
   if (contentEl.length > 0) {
     // Remove scripts, styles, and navigation elements
-    contentEl.find('script, style, nav, header, footer, .paywall, .ad, [data-test-id="paywall"]').remove();
+    contentEl
+      .find('script, style, nav, header, footer, .paywall, .ad, [data-test-id="paywall"]')
+      .remove();
 
     // Get text content
-    content = contentEl.text()
+    content = contentEl
+      .text()
       .replace(/\s+/g, ' ')
       .replace(/\n{3,}/g, '\n\n')
       .trim();
@@ -211,7 +220,9 @@ export function parseTranscriptHtml(html: string, sourceUrl: string): ParseResul
     foundSelectors.push('transcriptBody');
   } else {
     // Fallback: try to get all paragraph text
-    const paragraphs = $('article p, .article-content p').map((_, el) => $(el).text()).get();
+    const paragraphs = $('article p, .article-content p')
+      .map((_, el) => $(el).text())
+      .get();
     if (paragraphs.length > 0) {
       content = paragraphs.join('\n\n');
       warnings.push('Content extracted from paragraphs, not article body');
@@ -226,8 +237,10 @@ export function parseTranscriptHtml(html: string, sourceUrl: string): ParseResul
 
   // Look for participants section
   const participantHeaders = $('h2, h3, strong').filter(function () {
-    return $(this).text().toLowerCase().includes('call participants') ||
-      $(this).text().toLowerCase().includes('conference call participants');
+    return (
+      $(this).text().toLowerCase().includes('call participants') ||
+      $(this).text().toLowerCase().includes('conference call participants')
+    );
   });
 
   if (participantHeaders.length > 0) {
@@ -248,7 +261,8 @@ export function parseTranscriptHtml(html: string, sourceUrl: string): ParseResul
     // Try to find participants in content
     if (content) {
       // Look for patterns like "John Smith - CEO" or "Jane Doe, CFO"
-      const participantPattern = /([A-Z][a-z]+\s+[A-Z][a-z]+)\s*[-–]\s*(CEO|CFO|President|Chief|VP|Vice President|Director|Analyst)/gi;
+      const participantPattern =
+        /([A-Z][a-z]+\s+[A-Z][a-z]+)\s*[-–]\s*(CEO|CFO|President|Chief|VP|Vice President|Director|Analyst)/gi;
       let match;
       while ((match = participantPattern.exec(content)) !== null) {
         const participant = `${match[1]} - ${match[2]}`;
@@ -261,7 +275,9 @@ export function parseTranscriptHtml(html: string, sourceUrl: string): ParseResul
     if (participants.length === 0) {
       warnings.push('Could not extract call participants');
     } else {
-      warnings.push('Participants extracted from content patterns, not dedicated section');
+      warnings.push(
+        'Participants extracted from content patterns, not dedicated section'
+      );
     }
   }
 
@@ -275,7 +291,9 @@ export function parseTranscriptHtml(html: string, sourceUrl: string): ParseResul
   if (!content) {
     errors.push('No transcript content could be extracted');
   } else if (wordCount < 100) {
-    errors.push(`Content too short: ${wordCount} words. May be a preview or paywall page.`);
+    errors.push(
+      `Content too short: ${wordCount} words. May be a preview or paywall page.`
+    );
   }
 
   if (!companyName && !ticker) {
@@ -315,7 +333,11 @@ export function parseTranscriptHtml(html: string, sourceUrl: string): ParseResul
 /**
  * Check if HTML appears to be a Seeking Alpha transcript page
  */
-export function isTranscriptPage(html: string): { isTranscript: boolean; confidence: number; reasons: string[] } {
+export function isTranscriptPage(html: string): {
+  isTranscript: boolean;
+  confidence: number;
+  reasons: string[];
+} {
   if (!html || html.length < 1000) {
     return { isTranscript: false, confidence: 0, reasons: ['HTML too short'] };
   }
@@ -370,6 +392,34 @@ export function isTranscriptPage(html: string): { isTranscript: boolean; confide
 }
 
 /**
+ * Extract transcript article links from a listing page
+ */
+export function extractTranscriptLinks(html: string): string[] {
+  if (!html || html.length < 1000) return [];
+
+  const $ = cheerio.load(html);
+  const links = new Set<string>();
+
+  $('a[href*="/article/"]').each((_, el) => {
+    const href = $(el).attr('href');
+    if (!href) return;
+
+    const text = $(el).text().toLowerCase();
+    const isTranscriptLink =
+      href.toLowerCase().includes('transcript') || text.includes('transcript');
+    if (!isTranscriptLink) return;
+
+    const normalized = href.startsWith('http')
+      ? href
+      : `https://seekingalpha.com${href.startsWith('/') ? href : `/${href}`}`;
+
+    links.add(normalized.split('?')[0]);
+  });
+
+  return Array.from(links);
+}
+
+/**
  * Extract just the company ticker from a URL
  */
 export function extractTickerFromUrl(url: string): string | null {
@@ -403,8 +453,14 @@ export function detectPaywall(html: string): boolean {
   if (
     text.includes('subscribe to read') ||
     text.includes('premium article') ||
-    text.includes('unlock this article')
+    text.includes('unlock this article') ||
+    text.includes('access to this page has been denied') ||
+    text.includes('press & hold to confirm you are')
   ) {
+    return true;
+  }
+
+  if (html.includes('px-captcha') || html.includes('pxCaptcha')) {
     return true;
   }
 

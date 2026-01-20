@@ -110,7 +110,9 @@ export function BetForm({
             )}
             {selectedBet.trending && (
               <p className="text-yellow-400">
-                Trending in news ({selectedBet.newsCount} articles)
+                Trending in news ({selectedBet.newsRecency.today > 0
+                  ? `${selectedBet.newsRecency.today} today`
+                  : `${selectedBet.newsRecency.thisWeek} this week`})
               </p>
             )}
           </div>

@@ -10,7 +10,12 @@
 import puppeteer, { type Browser, type Page, type Cookie } from 'puppeteer';
 import fs from 'fs';
 import path from 'path';
-import { parseTranscriptHtml, isTranscriptPage, detectPaywall } from './parser';
+import {
+  parseTranscriptHtml,
+  isTranscriptPage,
+  detectPaywall,
+  extractTranscriptLinks,
+} from './parser';
 import { type ExtractedTranscriptData } from './validators/types';
 import { generateRawHtmlHash } from './utils/hashUtils';
 
@@ -255,7 +260,7 @@ export class TranscriptScraper {
   /**
    * Scrape a transcript page
    */
-  async scrapeTranscript(url: string): Promise<ScrapeResult> {
+  async scrapeTranscript(url: string, redirectCount: number = 0): Promise<ScrapeResult> {
     const startedAt = new Date().toISOString();
     const errors: string[] = [];
     const warnings: string[] = [];
@@ -303,7 +308,9 @@ export class TranscriptScraper {
       try {
         if (!this.page) throw new Error('Page not initialized');
 
-        console.log(`Fetching: ${url} (attempt ${retryCount + 1}/${this.config.maxRetries + 1})`);
+        console.log(
+          `Fetching: ${url} (attempt ${retryCount + 1}/${this.config.maxRetries + 1})`
+        );
 
         // Navigate to page
         await this.page.goto(url, {
@@ -324,8 +331,18 @@ export class TranscriptScraper {
 
         // Check if it's a transcript page
         const pageCheck = isTranscriptPage(rawHtml);
+        const transcriptLinks = extractTranscriptLinks(rawHtml);
         if (!pageCheck.isTranscript) {
-          warnings.push(`Low confidence this is a transcript page (${pageCheck.confidence}%)`);
+          if (transcriptLinks.length > 0 && redirectCount < 1) {
+            warnings.push(
+              `Detected transcript listing page; following first transcript link (${transcriptLinks[0]})`
+            );
+            return this.scrapeTranscript(transcriptLinks[0], redirectCount + 1);
+          }
+
+          warnings.push(
+            `Low confidence this is a transcript page (${pageCheck.confidence}%)`
+          );
           warnings.push(...pageCheck.reasons);
         }
 
@@ -337,7 +354,9 @@ export class TranscriptScraper {
         retryCount++;
 
         if (retryCount <= this.config.maxRetries) {
-          console.log(`Retry ${retryCount}/${this.config.maxRetries} after error: ${lastError.message}`);
+          console.log(
+            `Retry ${retryCount}/${this.config.maxRetries} after error: ${lastError.message}`
+          );
           await this.sleep(this.config.retryDelay);
         }
       }
@@ -371,13 +390,25 @@ export class TranscriptScraper {
     const parseResult = parseTranscriptHtml(rawHtml, url);
 
     if (!parseResult.success) {
+      const transcriptLinks = extractTranscriptLinks(rawHtml);
+      if (transcriptLinks.length > 0 && redirectCount < 1) {
+        warnings.push(
+          `Parsing failed on listing page; retrying first transcript link (${transcriptLinks[0]})`
+        );
+        return this.scrapeTranscript(transcriptLinks[0], redirectCount + 1);
+      }
+    }
+
+    if (!parseResult.success) {
       errors.push(...parseResult.errors);
     }
     warnings.push(...parseResult.warnings);
 
     // Pause before next request
     if (this.config.pauseBetweenRequests > 0) {
-      console.log(`Waiting ${this.config.pauseBetweenRequests / 1000}s before next request...`);
+      console.log(
+        `Waiting ${this.config.pauseBetweenRequests / 1000}s before next request...`
+      );
       await this.sleep(this.config.pauseBetweenRequests);
     }
 

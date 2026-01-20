@@ -2,7 +2,7 @@
 // Upload and manage earnings call transcripts for word analysis
 
 import { useState } from 'react';
-import { saveTranscript, type Transcript } from '@/lib/api/data';
+import { saveTranscript, deleteTranscript, type Transcript } from '@/lib/api/data';
 import {
   countOccurrences,
   highlightWord,
@@ -18,6 +18,7 @@ interface TranscriptsTabProps {
   transcripts: Transcript[];
   onTranscriptSaved: (transcript: Transcript) => void;
   onTranscriptUpdated?: (transcript: Transcript) => void;
+  onTranscriptDeleted?: (transcript: Transcript) => void;
 }
 
 export function TranscriptsTab({
@@ -27,6 +28,7 @@ export function TranscriptsTab({
   transcripts,
   onTranscriptSaved,
   onTranscriptUpdated,
+  onTranscriptDeleted,
 }: TranscriptsTabProps) {
   // Form state
   const [newTranscript, setNewTranscript] = useState('');
@@ -85,6 +87,22 @@ export function TranscriptsTab({
       });
     }
     setVerifyingTranscript(null);
+  };
+
+  // Handle transcript deletion
+  const handleDelete = async (transcript: Transcript) => {
+    if (!confirm(`Delete transcript for ${transcript.quarter} ${transcript.year}?`)) {
+      return;
+    }
+
+    try {
+      await deleteTranscript(transcript.eventTicker, transcript.date);
+      if (onTranscriptDeleted) {
+        onTranscriptDeleted(transcript);
+      }
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Failed to delete transcript');
+    }
   };
 
   // Get pending transcripts count
@@ -225,6 +243,7 @@ export function TranscriptsTab({
                   setExpandedTranscript(expandedTranscript === t.SK ? null : t.SK)
                 }
                 onVerify={() => setVerifyingTranscript(t)}
+                onDelete={() => handleDelete(t)}
               />
             ))}
           </div>
@@ -241,6 +260,7 @@ interface TranscriptCardProps {
   isExpanded: boolean;
   onToggle: () => void;
   onVerify: () => void;
+  onDelete: () => void;
 }
 
 function TranscriptCard({
@@ -249,6 +269,7 @@ function TranscriptCard({
   isExpanded,
   onToggle,
   onVerify,
+  onDelete,
 }: TranscriptCardProps) {
   return (
     <div className="bg-slate-800 rounded-lg p-4">
@@ -276,6 +297,13 @@ function TranscriptCard({
             className="text-xs text-slate-400 hover:text-white transition-colors"
           >
             {isExpanded ? 'Collapse' : 'Expand'}
+          </button>
+          <button
+            onClick={onDelete}
+            className="text-xs px-2 py-1 text-loss-400 hover:bg-loss-500/20 rounded transition-colors"
+            title="Delete transcript"
+          >
+            Delete
           </button>
         </div>
       </div>

@@ -10,16 +10,25 @@ interface GoogleNewsItem {
   source: string;
 }
 
+interface NewsArticle {
+  title: string;
+  source: string;
+  url: string;
+  publishedAt: string;
+}
+
+interface NewsRecency {
+  today: number;
+  thisWeek: number;
+  total: number;
+}
+
 interface NewsResult {
   word: string;
   articleCount: number;
+  recency: NewsRecency;
   trending: boolean;
-  articles: Array<{
-    title: string;
-    source: string;
-    url: string;
-    publishedAt: string;
-  }>;
+  articles: NewsArticle[];
   cached: boolean;
 }
 
@@ -85,6 +94,36 @@ function decodeHTMLEntities(text: string): string {
     .replace(/&apos;/g, "'");
 }
 
+// Calculate recency breakdown for articles
+function calculateRecency(articles: NewsArticle[]): NewsRecency {
+  const now = new Date();
+  const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const weekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+
+  let today = 0;
+  let thisWeek = 0;
+
+  for (const article of articles) {
+    try {
+      const pubDate = new Date(article.publishedAt);
+      if (pubDate >= todayStart) {
+        today++;
+        thisWeek++;
+      } else if (pubDate >= weekAgo) {
+        thisWeek++;
+      }
+    } catch {
+      // Skip articles with invalid dates
+    }
+  }
+
+  return {
+    today,
+    thisWeek,
+    total: articles.length,
+  };
+}
+
 // Build Google News RSS URL for a search query
 function buildGoogleNewsURL(query: string): string {
   const encodedQuery = encodeURIComponent(query);
@@ -96,10 +135,12 @@ export async function fetchNewsForWord(word: string, company?: string): Promise<
   // Check cache first
   const cached = await getCachedNews(word);
   if (cached) {
+    const recency = calculateRecency(cached.articles);
     return {
       word,
       articleCount: cached.articleCount,
-      trending: cached.articleCount >= 5,
+      recency,
+      trending: recency.today >= 3 || recency.thisWeek >= 5,
       articles: cached.articles,
       cached: true,
     };
@@ -123,13 +164,16 @@ export async function fetchNewsForWord(word: string, company?: string): Promise<
     const xml = await response.text();
     const items = parseRSS(xml);
 
-    // Transform to our format
-    const articles = items.slice(0, 20).map((item) => ({
+    // Transform to our format (no cap - Google RSS typically returns ~100 max)
+    const articles = items.map((item) => ({
       title: item.title,
       source: item.source,
       url: item.link,
       publishedAt: item.pubDate,
     }));
+
+    // Calculate recency breakdown
+    const recency = calculateRecency(articles);
 
     // Cache the results (6 hour TTL)
     await cacheNewsResults(word, articles);
@@ -137,7 +181,8 @@ export async function fetchNewsForWord(word: string, company?: string): Promise<
     return {
       word,
       articleCount: articles.length,
-      trending: articles.length >= 5,
+      recency,
+      trending: recency.today >= 3 || recency.thisWeek >= 5,
       articles,
       cached: false,
     };
@@ -146,6 +191,7 @@ export async function fetchNewsForWord(word: string, company?: string): Promise<
     return {
       word,
       articleCount: 0,
+      recency: { today: 0, thisWeek: 0, total: 0 },
       trending: false,
       articles: [],
       cached: false,

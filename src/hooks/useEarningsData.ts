@@ -16,19 +16,29 @@ import {
   type EarningsEvent,
 } from '@/lib/api/data';
 import { countOccurrences } from '@/lib/utils/wordAnalysis';
+import { useKalshiWebSocket, type TickerUpdate } from './useKalshiWebSocket';
+
+// News recency breakdown
+export interface NewsRecency {
+  today: number;
+  thisWeek: number;
+  total: number;
+}
 
 // Word bet with all analysis data
 export interface WordBet {
   ticker: string;
   word: string;
-  chance: number;
-  yesPrice: number;
-  noPrice: number;
+  chance: number;      // Last traded price (displayed as %)
+  yesPrice: number;    // Best bid price (for placing YES orders)
+  noPrice: number;     // Best bid price (for placing NO orders)
+  lastPrice: number;   // Last traded price (same as chance)
   priceChange: number;
   volume: number;
   transcriptCount: number;
   trending: boolean;
   newsCount: number;
+  newsRecency: NewsRecency;
 }
 
 interface UseEarningsDataResult {
@@ -64,6 +74,10 @@ interface UseEarningsDataResult {
 
   // Refresh functions
   refreshNews: () => Promise<void>;
+
+  // Real-time WebSocket data
+  isWebSocketConnected: boolean;
+  isKalshiLive: boolean;
 }
 
 export function useEarningsData(company: string, eventTicker: string): UseEarningsDataResult {
@@ -87,6 +101,49 @@ export function useEarningsData(company: string, eventTicker: string): UseEarnin
 
   // Company name from event or fallback
   const companyName = earningsEvent?.company || company || eventTicker;
+
+  // WebSocket for real-time updates
+  const {
+    isConnected: isWebSocketConnected,
+    isKalshiConnected: isKalshiLive,
+    subscribe,
+    onTicker,
+  } = useKalshiWebSocket();
+
+  // Handle real-time ticker updates
+  useEffect(() => {
+    onTicker((update: TickerUpdate) => {
+      // Update markets with new data
+      setMarkets((prevMarkets) =>
+        prevMarkets.map((market) => {
+          if (market.ticker === update.market_ticker) {
+            return {
+              ...market,
+              yes_bid: update.yes_bid,
+              yes_ask: update.yes_ask,
+              no_bid: update.no_bid,
+              no_ask: update.no_ask,
+              last_price: update.last_price,
+              volume: update.volume,
+              volume_24h: update.volume_24h,
+              open_interest: update.open_interest,
+              // Update previous price for change calculation
+              previous_price: market.last_price,
+            };
+          }
+          return market;
+        })
+      );
+    });
+  }, [onTicker]);
+
+  // Subscribe to WebSocket updates when markets are loaded
+  useEffect(() => {
+    if (markets.length > 0 && isWebSocketConnected) {
+      const tickers = markets.map((m) => m.ticker);
+      subscribe(tickers);
+    }
+  }, [markets.length, isWebSocketConnected, subscribe]);
 
   // Fetch earnings event from DynamoDB
   useEffect(() => {
@@ -206,13 +263,21 @@ export function useEarningsData(company: string, eventTicker: string): UseEarnin
     }
   }, [markets.length, earningsEvent?.markets?.length, loading, refreshNews]);
 
+  // Default recency for when no news data available
+  const defaultRecency: NewsRecency = { today: 0, thisWeek: 0, total: 0 };
+
   // Convert markets to word bets with analysis
   // Use Kalshi markets if available, otherwise use earnings event markets from DynamoDB
+  // Note: Kalshi API returns prices as integers (0-100), not decimals
+  // - last_price: the last traded price (what Kalshi displays as the %)
+  // - yes_bid/no_bid: the best bid prices (what you'd get if placing an order)
   const wordBets: WordBet[] = markets.length > 0
     ? markets.map((m) => {
         const word = m.yes_sub_title || m.subtitle || m.ticker.split('-').pop() || '';
-        const yesPrice = Math.round((m.yes_bid || m.last_price || 0) * 100);
-        const prevPrice = Math.round((m.previous_price || m.last_price || 0) * 100);
+        const lastPrice = m.last_price || 0;
+        const yesPrice = m.yes_bid || lastPrice;
+        const noPrice = m.no_bid || (100 - lastPrice);
+        const prevPrice = m.previous_price || lastPrice;
 
         // Count word in transcripts
         const transcriptCount = transcripts.reduce((sum, t) => {
@@ -225,14 +290,16 @@ export function useEarningsData(company: string, eventTicker: string): UseEarnin
         return {
           ticker: m.ticker,
           word,
-          chance: yesPrice,
-          yesPrice,
-          noPrice: 100 - yesPrice,
-          priceChange: yesPrice - prevPrice,
+          chance: lastPrice,      // Display the last traded price as %
+          yesPrice,               // Best bid for YES
+          noPrice,                // Best bid for NO
+          lastPrice,
+          priceChange: lastPrice - prevPrice,
           volume: m.volume || 0,
           transcriptCount,
           trending: news?.trending || false,
           newsCount: news?.articleCount || 0,
+          newsRecency: news?.recency || defaultRecency,
         };
       })
     : (earningsEvent?.markets || []).map((m) => {
@@ -244,17 +311,22 @@ export function useEarningsData(company: string, eventTicker: string): UseEarnin
         // Get news data
         const news = newsData[m.word.toLowerCase()];
 
+        // Use lastPrice for chance (Kalshi %), yesPrice/noPrice for order buttons
+        const lastPrice = m.lastPrice || m.yesPrice;
+
         return {
           ticker: m.ticker,
           word: m.word,
-          chance: m.yesPrice,
-          yesPrice: m.yesPrice,
-          noPrice: m.noPrice,
-          priceChange: 0, // No price history in stored data
+          chance: lastPrice,      // Display the last traded price as %
+          yesPrice: m.yesPrice,   // Best bid for YES
+          noPrice: m.noPrice,     // Best bid for NO
+          lastPrice,
+          priceChange: 0,         // No price history in stored data
           volume: m.volume,
           transcriptCount,
           trending: news?.trending || false,
           newsCount: news?.articleCount || 0,
+          newsRecency: news?.recency || defaultRecency,
         };
       });
 
@@ -274,5 +346,7 @@ export function useEarningsData(company: string, eventTicker: string): UseEarnin
     newsData,
     loadingNews,
     refreshNews,
+    isWebSocketConnected,
+    isKalshiLive,
   };
 }
